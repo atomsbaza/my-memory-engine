@@ -29,7 +29,7 @@ S5 recall gate: recall@5 0.8667 · MRR 0.85 · 30 pairs · hook latency p50 61 m
 | **Eval gate** | 30-pair golden corpus, recall@5 + MRR + threshold sweep, fail-closed against `eval/baseline.json`. Runs as a recurring gate on every engine change that can affect retrieval. |
 | **Sync** | Any git remote (GitHub / Bitbucket / self-hosted) through the git CLI. Opt-in per memory home, never `--force`, conflicts stop with a named file. |
 | **Observability** | `mem trace <query>` prints the RRF breakdown (fts/vec/scored ranks, retention score) plus per-layer context budgets; `mem stats` reports decay buckets and harness coverage. |
-| **Installer** | `mem-install` wires MCP + hooks for claude, codex, gemini, opencode, cursor, hermes and omp — idempotent, byte-backup before every write, warns on `core.hooksPath`. |
+| **Installer** | `mem-install` wires MCP for nine harnesses (claude, codex, gemini, opencode, cursor, hermes, omp, kiro-cli, qoder) plus hooks where supported — idempotent, byte-backup before every write, warns on `core.hooksPath`. |
 | **Benchmark** | `tools/benchmark-hook.sh` gates hook p50 latency ≤ 150 ms on a 480-record synthetic corpus (with a delay-based negative control). |
 
 ## Build
@@ -106,6 +106,8 @@ architecture gate with 0 blockers). Migration plan and phase gates:
 |---|---|---|
 | claude | ✅ Go | MCP + hooks cut over, live probe 19/19 |
 | omp | ✅ Go | MCP + hooks + extension cut over, live probe 19/19 |
+| kiro-cli | ✅ Go (MCP) | registered in `~/.kiro/settings/mcp.json` (global scope), tools 13/13, write/read verified through `kiro-cli chat --trust-all-tools` |
+| qoder | ✅ Go (MCP) | registered in `~/.qoder/settings.json` (user scope), tools 13/13, write/read verified through `qoder -p --permission-mode bypassPermissions` |
 | codex, gemini, cursor, hermes, opencode | ⏳ deferred | still point at the frozen Python CLI (reads work; writes are refused with a pointer to this engine) |
 
 The Python CLI in the data repo is **read-only legacy** (tag `python-final`): write commands exit
