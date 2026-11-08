@@ -7,7 +7,7 @@
 # is what makes the rollback provably byte-exact (`cutover-switch.sh --to
 # python` restores the same bytes `--to engine` replaced) — see P3 spec §5.4.
 #
-# usage: tools/cutover-switch.sh --to engine|python|broken [--harness claude]
+# usage: tools/cutover-switch.sh --to engine|python|broken [--harness claude|omp]
 #                               [--home DIR] [--engine BIN] [--python-home DIR]
 #                               [--backup] [--dry-run]
 #
@@ -20,6 +20,11 @@
 #                    not exist, so `cutover-probe.sh --live` must FAIL.
 #   --backup         copy each config to <file>.bak-<UTC stamp> before editing.
 #   --dry-run        print the planned replacements, write nothing.
+#
+# Surfaces per harness: claude = ~/.claude.json + ~/.claude/settings.json (4
+# command strings). omp = ~/.omp/agent/mcp.json (MCP command) + the extension
+# symlink ~/.omp/agent/extensions/my-memory.ts (repointed to the writer's own
+# harness/omp/my-memory.ts; rollback restores the exact link target).
 #
 # Exit codes: 0 success/already-in-that-mode, 1 failure (unknown config shape,
 # JSON invalid after write), 2 usage.
@@ -35,7 +40,7 @@ backup=0
 dry=0
 
 usage() {
-  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -56,11 +61,12 @@ case "$to" in
   engine|python|broken) ;;
   *) echo "cutover-switch: --to engine|python|broken is required" >&2; exit 2 ;;
 esac
-if [ "$harness" != "claude" ]; then
-  # P3.2–P3.6 add their own config surfaces; refusing beats guessing a schema.
-  echo "cutover-switch: harness '$harness' not implemented yet (P3.1 implements claude only)" >&2
-  exit 2
-fi
+case "$harness" in
+  claude|omp) ;;
+  *) # Other harnesses add their own config surfaces; refusing beats guessing a schema.
+     echo "cutover-switch: harness '$harness' not implemented yet (implemented: claude, omp)" >&2
+     exit 2 ;;
+esac
 
 [ -n "$engine_bin" ] || engine_bin="$here/../bin/mem"
 if [ -d "$(dirname "$engine_bin")" ]; then
@@ -71,30 +77,46 @@ if [ "$to" = "engine" ] && [ ! -x "$engine_bin" ]; then
   exit 1
 fi
 
-mcp_config="$home_dir/.claude.json"
-hook_config="$home_dir/.claude/settings.json"
-for f in "$mcp_config" "$hook_config"; do
-  if [ ! -f "$f" ]; then
-    echo "cutover-switch: missing config: $f" >&2
-    exit 1
-  fi
-done
+ext_link=""
+if [ "$harness" = "omp" ]; then
+  # omp: MCP JSON + the TS extension symlink (hook surface). No hooks JSON exists.
+  mcp_config="$home_dir/.omp/agent/mcp.json"
+  hook_config=""
+  ext_link="$home_dir/.omp/agent/extensions/my-memory.ts"
+  [ -f "$mcp_config" ] || { echo "cutover-switch: missing config: $mcp_config" >&2; exit 1; }
+  [ -L "$ext_link" ] || { echo "cutover-switch: extension symlink missing: $ext_link" >&2; exit 1; }
+else
+  mcp_config="$home_dir/.claude.json"
+  hook_config="$home_dir/.claude/settings.json"
+  for f in "$mcp_config" "$hook_config"; do
+    if [ ! -f "$f" ]; then
+      echo "cutover-switch: missing config: $f" >&2
+      exit 1
+    fi
+  done
+fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 if [ "$backup" = 1 ] && [ "$dry" = 0 ]; then
   for f in "$mcp_config" "$hook_config"; do
+    [ -n "$f" ] || continue
     cp -p "$f" "$f.bak-$stamp"
     echo "BACKUP $f.bak-$stamp sha256=$(shasum -a 256 "$f.bak-$stamp" | cut -d' ' -f1)"
   done
+  if [ -n "$ext_link" ]; then
+    # cp -P keeps the link itself, so the pre-switch target is preserved byte-exact.
+    cp -P "$ext_link" "$ext_link.bak-$stamp"
+    echo "BACKUP $ext_link.bak-$stamp target=$(readlink "$ext_link.bak-$stamp")"
+  fi
 fi
 
-exec python3 - "$to" "$home_dir" "$engine_bin" "$python_home" "$dry" "$mcp_config" "$hook_config" <<'PY'
+exec python3 - "$to" "$home_dir" "$engine_bin" "$python_home" "$dry" "$mcp_config" "$hook_config" "$harness" "$ext_link" <<'PY'
 import hashlib
 import json
 import os
 import sys
 
-to, home_dir, engine, python_home, dry, mcp_path, hook_path = sys.argv[1:8]
+to, home_dir, engine, python_home, dry, mcp_path, hook_path, harness, ext_link = sys.argv[1:10]
 dry = dry == "1"
 broken = os.path.join(home_dir, ".cutover-broken-engine", "mem")
 
@@ -145,9 +167,9 @@ def hook_commands(doc):
 
 
 mcp_doc = json.loads(read(mcp_path))
-hook_doc = json.loads(read(hook_path))
+hook_doc = json.loads(read(hook_path)) if hook_path else None
 cur_mcp = mcp_command(mcp_doc)
-cur_hooks = hook_commands(hook_doc)
+cur_hooks = hook_commands(hook_doc) if hook_doc else None
 
 
 def variant(mode, event=None):
@@ -160,6 +182,75 @@ def variant(mode, event=None):
     if mode == "broken":
         return broken if event is None else "%s hook --agent claude --event %s" % (broken, HOOK_EVENTS[event])
     raise SystemExit("cutover-switch: unknown mode %r" % mode)
+
+
+def variant_ext(mode):
+    # omp only: where the extension symlink must point in each mode.
+    repo = os.path.dirname(os.path.dirname(engine))
+    if mode == "engine":
+        return os.path.join(repo, "harness", "omp", "my-memory.ts")
+    if mode == "python":
+        return os.path.join(python_home, "harness", "omp", "my-memory.ts")
+    if mode == "broken":
+        return os.path.join(home_dir, ".cutover-broken-engine", "harness", "omp", "my-memory.ts")
+    raise SystemExit("cutover-switch: unknown mode %r" % mode)
+
+
+if harness == "omp":
+    try:
+        cur_ext = os.readlink(ext_link)
+    except OSError as err:
+        raise SystemExit("cutover-switch: cannot readlink %s: %s" % (ext_link, err))
+    modes = [m for m in ("engine", "python", "broken")
+             if cur_mcp == variant(m) and cur_ext == variant_ext(m)]
+    if len(modes) != 1:
+        # Mixed state (mcp points one way, extension the other) is a real hazard.
+        raise SystemExit(
+            "cutover-switch: omp config is in an unknown/mixed state (mcp=%r, ext=%r) — refusing to rewrite blindly"
+            % (cur_mcp, cur_ext)
+        )
+    current = modes[0]
+    if current == to:
+        print("STATE already mode=%s" % to)
+        print("FILE %s sha256=%s" % (mcp_path, sha(mcp_path)))
+        print("EXT %s -> %s" % (ext_link, cur_ext))
+        raise SystemExit(0)
+
+    plan = [(mcp_path, cur_mcp, variant(to)), (ext_link, cur_ext, variant_ext(to))]
+    for path, old, new in plan:
+        print("%s %s : %s -> %s" % ("PLAN" if dry else "EDIT", path, old, new))
+    if dry:
+        print("STATE dry-run mode=%s desired=%s" % (current, to))
+        raise SystemExit(0)
+
+    text = read(mcp_path)
+    token_old, token_new = json.dumps(cur_mcp), json.dumps(variant(to))
+    if text.count(token_old) != 1:
+        raise SystemExit(
+            "cutover-switch: %s: expected 1 occurrence of %s, found %d"
+            % (mcp_path, token_old, text.count(token_old))
+        )
+    text = text.replace(token_old, token_new)
+    new_doc = json.loads(text)
+    if mcp_command(new_doc) != variant(to):
+        raise SystemExit("cutover-switch: post-check failed: mcp command did not change to %r" % variant(to))
+    mode_bits = os.stat(mcp_path).st_mode & 0o777
+    tmp = mcp_path + ".cutover-tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.chmod(tmp, mode_bits)
+    os.replace(tmp, mcp_path)
+
+    tmplink = ext_link + ".cutover-tmp"
+    if os.path.lexists(tmplink):
+        os.remove(tmplink)
+    os.symlink(variant_ext(to), tmplink)
+    os.replace(tmplink, ext_link)
+
+    print("STATE switched mode=%s -> %s" % (current, to))
+    print("FILE %s sha256=%s" % (mcp_path, sha(mcp_path)))
+    print("EXT %s -> %s" % (ext_link, os.readlink(ext_link)))
+    raise SystemExit(0)
 
 
 def detect():
