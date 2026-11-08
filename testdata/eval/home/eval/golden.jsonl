@@ -1,0 +1,3 @@
+{"query": "how to stop goroutine fan-out in go", "expect": ["lesson.face0001"], "origin": "authored"}
+{"query": "rebase shared branch before review", "expect": ["lesson.face0002"], "origin": "authored"}
+{"query": "why one go module for the engine", "expect": ["decision.face0003"], "origin": "authored"}

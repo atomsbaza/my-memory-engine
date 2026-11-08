@@ -271,9 +271,25 @@ func isGitRepo(root string) bool {
 	return err == nil
 }
 
-// commitFile stages and commits exactly one record file locally. It never
-// pushes and never touches the network (sync is a later phase).
+// commitFile stages and commits exactly one record file locally with the
+// standard add message. It never pushes and never touches the network
+// (sync is a later phase).
 func commitFile(root, rel, layer, scope, title string) error {
+	return commitMsg(root, rel, fmt.Sprintf("%s(%s): %s", layer, scope, truncRunes(title, 72)))
+}
+
+// CommitPath stages and commits exactly one file with an explicit message.
+// It is the exported seam for domain lifecycle commits that do not follow
+// the "<layer>(<scope>): <title>" add format (review, supersede). It never
+// pushes and never touches the network.
+func CommitPath(root, rel, msg string) error {
+	return commitMsg(root, rel, msg)
+}
+
+// commitMsg stages and commits exactly one file. A non-repo root, a missing
+// git binary or a failed commit is returned as an error — the caller keeps
+// the already-persisted file and reports the failure (never a silent skip).
+func commitMsg(root, rel, msg string) error {
 	if !isGitRepo(root) {
 		return fmt.Errorf("%s is not a git repository — record persisted but not committed", root)
 	}
@@ -281,13 +297,12 @@ func commitFile(root, rel, layer, scope, title string) error {
 	if err != nil {
 		return fmt.Errorf("git unavailable: %w — record persisted but not committed", err)
 	}
-	msg := fmt.Sprintf("%s(%s): %s", layer, scope, truncRunes(title, 72))
 	add := exec.Command(git, "-C", root, "add", "--", rel)
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add %s: %w: %s", rel, err, truncRunes(firstLine(string(out)), 200))
 	}
 	// Hermetic identity: commits must not depend on the machine's global
-	// git config.
+// git config.
 	commit := exec.Command(git, "-C", root,
 		"-c", "user.name=mem-engine", "-c", "user.email=mem-engine@localhost",
 		"commit", "-m", msg, "--", rel)
@@ -295,6 +310,21 @@ func commitFile(root, rel, layer, scope, title string) error {
 		return fmt.Errorf("git commit %s: %w: %s", rel, err, truncRunes(firstLine(string(out)), 200))
 	}
 	return nil
+}
+
+// WithLock runs fn while holding the store's exclusive flock on
+// <root>/.memory/.lock. It is the exported seam for read-modify-write
+// cycles above the store layer (domain cite/review/supersede), mirroring
+// the Python engine's per-command locks. Callers must not invoke
+// WriteRecord inside fn — WriteRecord takes the same lock itself and a
+// second exclusive flock from one process would self-deadlock.
+func WithLock(root string, fn func() error) error {
+	unlock, err := lockRoot(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
 }
 
 // runtimeLogName is the observable partial-failure log under the root's
