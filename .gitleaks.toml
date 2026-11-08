@@ -1,0 +1,29 @@
+# gitleaks config — the default ruleset, plus one narrow, literal allowlist.
+#
+# Why an allowlist at all: the Go tests deliberately write *synthetic*
+# secret-shaped values so they can assert that the store/domain secret guard
+# refuses them (`internal/{domain,store}/*_test.go`). Those literals were
+# committed before P4.2 (engine history is immutable — rewriting it to hide a
+# finding is forbidden by the release spec), so they are allowlisted here by
+# exact value. The working tree was also cleaned up in P4.2: the fixtures now
+# use a 6-character rotation, which the default ruleset does not consider a
+# secret.
+#
+# Rules for maintaining this file:
+#   * never allowlist a path (a whole test file could later carry a real token);
+#   * only exact fixture literals, and only with a matching entry in the P4.2
+#     scrub ledger (`$WF/parity/P4/scrub-ledger.md`);
+#   * a new value here means a new review of the file that contains it.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "synthetic secret-shaped guard fixtures in Go tests (test-generated, not credentials)"
+regexTarget = "secret"
+regexes = [
+  '''^abcdefabcdefabcdef$''',
+  '''^abcdefabcdefabcdefabcdef$''',
+  '''^abcdefghijklmnop12$''',
+  '''^abcdefghijklmnop1234$''',
+  '''^abcdef0123456789abcdef$''',
+]

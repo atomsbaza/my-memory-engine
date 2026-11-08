@@ -11,3 +11,4 @@ custom_field: some-value
 ---
 
 Decision body.
+(synthetic fixture — provenance: test-generated, not corpus-derived)

@@ -1,7 +1,7 @@
 # Research Addendum — Bun + TypeScript ในฐานะ candidate ของ my-memory framework migration
 
 > **Stage:** RESEARCH addendum · **วันที่ของเนื้อหา (observed date):** 2026-10-17 · **วันที่ materialize:** 2026-10-17
-> **Run:** worktree `/Users/pisitkoolplukpol/my-memory-wf-my-memory-framework-migration` (branch `wf/my-memory-framework-migration`) — ไฟล์นี้อยู่ **ใน data repo/worktree นี้เท่านั้น** ไม่ใช่ global `~/Work`
+> **Run:** worktree `$HOME/my-memory-wf-my-memory-framework-migration` (branch `wf/my-memory-framework-migration`) — ไฟล์นี้อยู่ **ใน data repo/worktree นี้เท่านั้น** ไม่ใช่ global `~/Work`
 
 ## Provenance (อ่านก่อนใช้เอกสารนี้)
 
@@ -16,7 +16,7 @@
 
 ### สาเหตุของ artifact ที่วางผิดที่ (แก้ข้ออ้างเดิม)
 
-งาน materialize รอบก่อนเขียนไฟล์นี้ไปที่ **global path** `~/Work/docs/workflow/my-memory-framework-migration/research-bun-addendum.md` และระบุในหัวเอกสารว่า *prior artifacts ไม่มีอยู่บนดิสก์* (ค้น `~/Work` ทั้ง tree, `~/my-memory`, worktrees อื่น ฯลฯ) → **ข้ออ้างนั้นไม่ถูกต้อง**: artifact ของ run นี้อยู่ครบใน **git worktree** `/Users/pisitkoolplukpol/my-memory-wf-my-memory-framework-migration/docs/workflow/my-memory-framework-migration/` (`research.md`, `design.md`, `exploration.md`, `log.md`, `learnings.md`) — การค้นเดิมยึด default cwd (`~/Work`) แทน absolute path ของ worktree จึงไม่พบ
+งาน materialize รอบก่อนเขียนไฟล์นี้ไปที่ **global path** `~/Work/docs/workflow/my-memory-framework-migration/research-bun-addendum.md` และระบุในหัวเอกสารว่า *prior artifacts ไม่มีอยู่บนดิสก์* (ค้น `~/Work` ทั้ง tree, `~/my-memory`, worktrees อื่น ฯลฯ) → **ข้ออ้างนั้นไม่ถูกต้อง**: artifact ของ run นี้อยู่ครบใน **git worktree** `$HOME/my-memory-wf-my-memory-framework-migration/docs/workflow/my-memory-framework-migration/` (`research.md`, `design.md`, `exploration.md`, `log.md`, `learnings.md`) — การค้นเดิมยึด default cwd (`~/Work`) แทน absolute path ของ worktree จึงไม่พบ
 
 **สิ่งที่แก้ในไฟล์นี้:** (1) provenance ที่ถูกต้อง (เนื้อหามาจาก chat response ของ prior agent + อ่าน `research.md`/`design.md` ของ worktree จริง), (2) การ align กับ evidence IDs และเกณฑ์ใน `research.md`/`design.md` แทนการอ้าง "สิ่งที่ผู้ว่าจ้างแจ้งมา" แบบลอย ๆ, (3) เก็บ Bun evidence/source URLs/uncertainty labels ไว้ทั้งหมด
 

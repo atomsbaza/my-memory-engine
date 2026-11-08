@@ -170,7 +170,7 @@ func TestPromoteRefusesBeforeWriting(t *testing.T) {
 		root := copyHome(t)
 		pinClock(t, "2026-11-08T12:00:00")
 		writeRecFile(t, root, "lesson", "lesson.cafe0003", "leaky lesson",
-			"**Rule.** wire it up.\n**Evidence.** password: abcdefghijklmnop1234", func(fm codec.Frontmatter) {
+			"**Rule.** wire it up.\n**Evidence.** password: abcdefabcdefabcdefabcdef", func(fm codec.Frontmatter) {
 				fm["uses"] = 3
 				fm["successes"] = 3
 			})

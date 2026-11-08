@@ -2,7 +2,7 @@
 
 - **Artifact นี้คืออะไร:** local codebase exploration สำหรับงาน **my-memory framework migration** (research/design/plan เท่านั้น — ไม่ตัดสินภาษา/provider ที่นี่; solution-architect ตัดสิน)
 - **Observed date ของหลักฐานทั้งหมด:** 2026-10-17
-- **Evidence base:** worktree `wf/my-memory-framework-migration` = `/Users/pisitkoolplukpol/my-memory-wf-my-memory-framework-migration` (linked worktree — `.git` เป็นไฟล์ชี้ `/Users/pisitkoolplukpol/my-memory/.git/worktrees/my-memory-wf-my-memory-framework-migration`)
+- **Evidence base:** worktree `wf/my-memory-framework-migration` = `$HOME/my-memory-wf-my-memory-framework-migration` (linked worktree — `.git` เป็นไฟล์ชี้ `$HOME/my-memory/.git/worktrees/my-memory-wf-my-memory-framework-migration`)
 - **ขอบเขต:** current-state + migration seam เท่านั้น · ไม่แก้ source code / `research.md` / `log.md`
 - **สถานะที่ตรวจไม่ได้ในรอบนี้:** harness นี้ไม่มี shell/exec tool (มีแค่ read/glob/grep + MCP) → **ไม่ได้รัน** `tests/test-mem.sh`, `mem verify`, `git status` · ดู §6 สำหรับรายละเอียดข้อจำกัด
 
@@ -16,7 +16,7 @@ Repo เป็น **data + engine รวมกัน** ในที่เดี�
 |---|---|---|
 | `bin/mem` | engine ทั้งหมด: CLI + hook + MCP + stats + eval · **ไฟล์เดียว Python 3.9 stdlib** 2,171 บรรทัด | `bin/mem:1-9` (shebang + docstring) · บรรทัดสุดท้าย `bin/mem:2171` |
 | `bin/mem-backup` | backup kit (bash): `run`/`drill`/`status`/`setup` · bundle → gpg-symmetric → offsite | `bin/mem-backup:1-8,20-31` · `schema/backup.json` |
-| `bin/com.pisit.mem-backup.plist` | LaunchAgent template (schedule มาจาก schema) | `harness/install.sh:19` · README:471-473 |
+| `bin/com.<owner>.mem-backup.plist` | LaunchAgent template (schedule มาจาก schema) | `harness/install.sh:19` · README:471-473 |
 | `schema/` | contracts 4 ไฟล์: `record.schema.json`, `taxonomy.json`, `agents.json`, `backup.json` | README:645 |
 | `harness/` | `mem-hook.sh` (entry point เดียว), `install.sh` (gated installer), `pre-push.sh` (gitleaks), `opencode/my-memory.js` (plugin), `README.md` | `harness/README.md:1-14` |
 | `tests/test-mem.sh` | black-box suite รันบนสำเนา temp · **187 assertion sites** (นับด้วย grep) | `tests/test-mem.sh:1-41` |

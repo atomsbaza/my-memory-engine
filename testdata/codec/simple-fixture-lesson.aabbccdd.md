@@ -10,3 +10,4 @@ sensitivity: internal
 ---
 
 Body text here.
+(synthetic fixture — provenance: test-generated, not corpus-derived)

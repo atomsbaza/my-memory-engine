@@ -63,7 +63,7 @@ func TestVerifyProblems(t *testing.T) {
 		func(fm codec.Frontmatter) { fm["sensitivity"] = "quarantine" })
 	// Secret-shaped content.
 	writeRecFile(t, root, "lesson", "lesson.bbbb000a", "secret carrier",
-		"password = abcdef0123456789abcdef\n"+provenanceMarker, nil)
+		"password = abcdefabcdefabcdefabcdef\n"+provenanceMarker, nil)
 	// Machine absolute path.
 	writeRecFile(t, root, "lesson", "lesson.bbbb000b", "path carrier",
 		"see /Users/fixture/secret.txt\n"+provenanceMarker, nil)

@@ -5,6 +5,7 @@ package schema
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -66,13 +67,17 @@ func TestLoadSchema_Defaults(t *testing.T) {
 	}
 }
 
+// concreteUserPath matches a home directory followed by a real user name
+// (`/Users/<name>`, `/home/<name>`, `C:\Users\<name>`) — not the bare
+// forbidden-path fragment, which schema defaults carry by design.
+var concreteUserPath = regexp.MustCompile(`(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]`)
+
 // TestLoadSchema_DefaultsHaveNoMachinePaths proves TB-5 for schema defaults.
 func TestLoadSchema_DefaultsHaveNoMachinePaths(t *testing.T) {
 	s, _ := LoadSchema("")
-	// "/Users/" is a forbidden-path *fragment* by design, so only check the
-	// data defaults that must never embed a real home directory.
+	// Only check the data defaults, which must never embed a home directory.
 	blob := strings.Join(append(append([]string{}, s.Tags...), s.SecretPatterns...), "\n")
-	if strings.Contains(blob, "/Users/pisit") || strings.Contains(blob, "C:\\Users\\") {
+	if concreteUserPath.MatchString(blob) {
 		t.Errorf("schema defaults embed a machine-specific path")
 	}
 }

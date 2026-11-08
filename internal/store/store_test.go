@@ -403,7 +403,7 @@ func TestGuard(t *testing.T) {
 		want string // substring of the error, "" for acceptance
 	}{
 		{"clean text accepted", "regression tests must fail before the fix lands", ""},
-		{"secret refused", "the api_key = abcdefghijklmnop12 leaked", "secret"},
+		{"secret refused", "the api_key = abcdefabcdefabcdef leaked", "secret"},
 		{"github token refused", "ghp_AAAAABBBBBCCCCCDDDDDEEEEE", "secret"},
 		{"absolute user path refused", "log lives at /Users/someone/notes.txt", "absolute path"},
 		{"home path refused", "see /home/alice/project", "absolute path"},
@@ -443,7 +443,7 @@ func TestGuard(t *testing.T) {
 	if err := GuardWith(&sch, "marker ZZSECRET-1234 here"); err == nil || !strings.Contains(err.Error(), "secret") {
 		t.Errorf("custom secret pattern must fire, got %v", err)
 	}
-	if err := GuardWith(&sch, "the api_key = abcdefghijklmnop12 leaked"); err != nil {
+	if err := GuardWith(&sch, "the api_key = abcdefabcdefabcdef leaked"); err != nil {
 		t.Errorf("schema patterns replace defaults — default-only hit must pass, got %v", err)
 	}
 	if err := GuardWith(nil, "clean"); err == nil || !strings.Contains(err.Error(), "nil") {
@@ -753,7 +753,7 @@ func TestWriteRecordRefusals(t *testing.T) {
 		{"append-only layer", writeFixture("ops", "global", "ledger entry", "ledger body"), "append-only", true},
 		{"empty body", writeFixture("lesson", "global", "title only", "   "), "empty", true},
 		{"missing scope", Record{Layer: "lesson", Title: "no scope", Body: "body"}, `"scope"`, true},
-		{"secret in body", writeFixture("lesson", "global", "leaky title", "api_key = abcdefghijklmnop12"), "secret", true},
+		{"secret in body", writeFixture("lesson", "global", "leaky title", "api_key = abcdefabcdefabcdef"), "secret", true},
 		{"absolute path in body", writeFixture("lesson", "global", "pathy title", "stored under /Users/alice/x"), "absolute path", true},
 		{"pii in body", writeFixture("lesson", "global", "maily title", "reach me at bob@example.org"), "personal data", true},
 		{"bad status", Record{Layer: "lesson", Scope: "global", Title: "bad status", Body: "body", Front: codec.Frontmatter{"status": "zombie"}}, "status", true},

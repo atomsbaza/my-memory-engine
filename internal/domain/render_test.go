@@ -281,7 +281,7 @@ func TestRenderBlockBudgetCut(t *testing.T) {
 	if strings.Contains(full, renderCutMarker) {
 		t.Fatalf("generous budget must not cut:\n%s", tail(full, 120))
 	}
-	if !strings.Contains(full, "ตรวจ artifact จริง") || !strings.Contains(full, "budget ของ block") {
+	if !strings.Contains(full, "ทดสอบการตัด block") || !strings.Contains(full, "budget ของ block") {
 		t.Fatal("both fixture rules must appear in the full block")
 	}
 

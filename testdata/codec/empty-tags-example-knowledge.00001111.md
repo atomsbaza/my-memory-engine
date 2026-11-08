@@ -11,3 +11,4 @@ sensitivity: internal
 ---
 
 Knowledge body.
+(synthetic fixture — provenance: test-generated, not corpus-derived)

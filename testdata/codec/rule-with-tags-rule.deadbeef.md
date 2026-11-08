@@ -11,3 +11,4 @@ sensitivity: internal
 ---
 
 Rule body.
+(synthetic fixture — provenance: test-generated, not corpus-derived)

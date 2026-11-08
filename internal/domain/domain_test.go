@@ -355,7 +355,7 @@ func TestAddGuardRefusals(t *testing.T) {
 
 	// Secret-shaped value → exit-equivalent 2.
 	_, err := Add(root, store.Record{Layer: "lesson", Scope: "global",
-		Body: "the api_key = abcdef0123456789abcdef leaked\n" + provenanceMarker},
+		Body: "the api_key = abcdefabcdefabcdefabcdef leaked\n" + provenanceMarker},
 		AddOptions{Title: "secret carrier"})
 	wantDomainErr(t, err, 2, "secret")
 

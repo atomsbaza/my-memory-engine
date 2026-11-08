@@ -9,5 +9,5 @@ status: active
 sensitivity: internal
 ---
 
-One feature = one branch + its own worktree; never reuse another feature's branch.
+Store fixture rule: the scan walk must read this file exactly once.
 (synthetic fixture — provenance: test-generated, not corpus-derived)

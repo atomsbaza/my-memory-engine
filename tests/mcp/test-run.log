@@ -2,7 +2,7 @@
 # date:     2026-11-08T13:41:48Z
 # sha:      dd61696
 # go:       go version go1.27.3 darwin/arm64
-# baseline: ok (/Users/pisitkoolplukpol/my-memory/bin/mem)
+# baseline: ok ($HOME/my-memory/bin/mem)
 === RUN   TestInitializeHandshake
 --- PASS: TestInitializeHandshake (0.11s)
 === RUN   TestInstructionsShape
@@ -76,4 +76,4 @@ ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	0.896s
 PASS
 ok  	github.com/atomsbaza/my-memory-engine/tests/mcp	1.231s
 exit=0
-baseline=ok (/Users/pisitkoolplukpol/my-memory/bin/mem)
+baseline=ok ($HOME/my-memory/bin/mem)

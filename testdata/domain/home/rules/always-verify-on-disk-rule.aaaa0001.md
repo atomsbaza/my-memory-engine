@@ -1,6 +1,6 @@
 ---
 id: rule.aaaa0001
-title: ตรวจ artifact จริงก่อนบอกว่าเสร็จ
+title: ตัวอย่างกฎสำหรับทดสอบ render
 layer: rule
 scope: global
 tags: [test]
@@ -12,5 +12,5 @@ status: active
 sensitivity: internal
 ---
 
-ตรวจ artifact จริงบนดิสก์ด้วยคำสั่งจริงก่อนอ้างว่างานเสร็จ — ห้ามสรุปจากความจำหรือจากแชท
+เนื้อหาตัวอย่างภาษาไทยสำหรับทดสอบการตัด block ตาม budget — ค้นด้วยคำว่า artifact ใน fixture นี้
 (synthetic fixture — provenance: test-generated, not corpus-derived)

@@ -12,3 +12,4 @@ sensitivity: internal
 ---
 
 Body with #hash and trailing whitespace issues.
+(synthetic fixture — provenance: test-generated, not corpus-derived)
