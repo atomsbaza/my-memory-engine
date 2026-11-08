@@ -1,6 +1,7 @@
 // Command mem-install wires harness CLIs (claude, codex, gemini, opencode,
-// cursor, hermes, omp) to the engine's MCP server and session hooks. All
-// logic lives in internal/harness; this entry point only owns the process.
+// cursor, hermes, omp, kiro, qoder) to the engine's MCP server and session
+// hooks (kiro/qoder: MCP only). All logic lives in internal/harness; this
+// entry point only owns the process.
 package main
 
 import (

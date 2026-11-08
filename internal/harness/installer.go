@@ -1,9 +1,10 @@
 // Package harness wires harness CLIs (claude, codex, gemini, opencode,
-// cursor, hermes, omp) to the engine: MCP server registration plus session
-// hooks. It is the P1.7 port of the Python repo's harness/install.sh,
-// sections 1 (MCP) and 2 (hooks); the LaunchAgent (--backup,
-// --promotion-cron) and git-hook (--git-hooks) sections stay in the Python
-// repo until their engine counterparts exist.
+// cursor, hermes, omp, kiro, qoder) to the engine: MCP server registration
+// plus session hooks. kiro and qoder are MCP-only (no hook config the
+// installer can merge). It is the P1.7 port of the Python repo's
+// harness/install.sh, sections 1 (MCP) and 2 (hooks); the LaunchAgent
+// (--backup, --promotion-cron) and git-hook (--git-hooks) sections stay in
+// the Python repo until their engine counterparts exist.
 //
 // Contract shared with install.sh:
 //
@@ -143,23 +144,44 @@ type mcpCLI struct {
 	bin  string // CLI binary to call
 	// addArgs builds the `mcp add` argument list for the engine binary.
 	addArgs func(mem string) []string
+	// probeArgs replaces the default `<bin> mcp list` idempotency probe; with
+	// it the server counts as registered iff the command exits 0. kiro needs
+	// this: `kiro-cli mcp list` writes its listing to stderr (so
+	// exec.Command.Output() sees nothing) while `mcp status --name` answers
+	// with the exit code alone.
+	probeArgs []string
 }
 
 var mcpCLIs = []mcpCLI{
-	{"claude", "claude", func(mem string) []string {
+	{name: "claude", bin: "claude", addArgs: func(mem string) []string {
 		return []string{"mcp", "add", "--scope", "user", "my-memory", "-e", "MEM_AGENT=claude", "--", mem, "mcp"}
 	}},
-	{"codex", "codex", func(mem string) []string {
+	{name: "codex", bin: "codex", addArgs: func(mem string) []string {
 		return []string{"mcp", "add", "my-memory", "--env", "MEM_AGENT=codex", "--", mem, "mcp"}
 	}},
-	{"gemini", "gemini", func(mem string) []string {
+	{name: "gemini", bin: "gemini", addArgs: func(mem string) []string {
 		return []string{"mcp", "add", "--scope", "user", "--env", "MEM_AGENT=gemini", "my-memory", mem, "mcp"}
 	}},
-	{"opencode", "opencode", func(mem string) []string {
+	{name: "opencode", bin: "opencode", addArgs: func(mem string) []string {
 		return []string{"mcp", "add", "--global", "--env", "MEM_AGENT=opencode", "my-memory", "--", mem, "mcp"}
 	}},
-	{"hermes", "hermes", func(mem string) []string {
+	{name: "hermes", bin: "hermes", addArgs: func(mem string) []string {
 		return []string{"mcp", "add", "my-memory", "--command", mem, "--args", "mcp"}
+	}},
+	// kiro-cli + qoder: MCP only — neither has a session-hook config the
+	// installer can merge (kiro hooks live inside agent JSON, qoder's hook
+	// support is unverified), so they appear in mcpCLIs only.
+	{name: "kiro", bin: "kiro-cli", addArgs: func(mem string) []string {
+		// Default scope is workspace, which only loads inside a directory
+		// that has its own .kiro/; global is ~/.kiro/settings/mcp.json and is
+		// inherited by the built-in kiro_default agent (includeMcpJson).
+		return []string{"mcp", "add", "--name", "my-memory", "--scope", "global",
+			"--command", mem, "--args", "mcp", "--env", "MEM_AGENT=kiro"}
+	}, probeArgs: []string{"mcp", "status", "--name", "my-memory"}},
+	{name: "qoder", bin: "qoder", addArgs: func(mem string) []string {
+		// --env is variadic, so it must be the joined form: `--env K=V` would
+		// swallow the server name/command positionals as further env values.
+		return []string{"mcp", "add", "my-memory", mem, "mcp", "-s", "user", "--env=MEM_AGENT=qoder"}
 	}},
 }
 
@@ -186,7 +208,7 @@ func (i *Installer) mcpSection(dry bool) {
 			continue
 		}
 		// Read-only idempotency probe, also in dry run (install.sh parity).
-		if out, err := i.opt.Run(h.bin, "mcp", "list"); err == nil && strings.Contains(out, "my-memory") {
+		if i.mcpRegistered(h) {
 			i.say("  %s: มีอยู่แล้ว ข้าม", h.name)
 			continue
 		}
@@ -207,6 +229,17 @@ func (i *Installer) mcpSection(dry bool) {
 		}
 		i.mcpFile(h, dry)
 	}
+}
+
+// mcpRegistered reports whether the CLI's registry already holds the
+// my-memory server. Read-only: safe to run in dry-run mode.
+func (i *Installer) mcpRegistered(h mcpCLI) bool {
+	if len(h.probeArgs) > 0 {
+		_, err := i.opt.Run(h.bin, h.probeArgs...)
+		return err == nil
+	}
+	out, err := i.opt.Run(h.bin, "mcp", "list")
+	return err == nil && strings.Contains(out, "my-memory")
 }
 
 // mcpFile merges {"mcpServers":{"my-memory":{command,args,env}}} into the

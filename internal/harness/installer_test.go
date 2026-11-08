@@ -3,6 +3,7 @@ package harness
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,13 @@ func (r *recorder) exec(name string, args ...string) (string, error) {
 	r.calls = append(r.calls, quoteCmd(name, args))
 	if len(args) >= 2 && args[0] == "mcp" && args[1] == "list" {
 		return r.listOut[name], nil
+	}
+	// kiro answers its idempotency probe with the exit code alone.
+	if len(args) >= 2 && args[0] == "mcp" && args[1] == "status" {
+		if strings.Contains(r.listOut[name], "my-memory") {
+			return "", nil
+		}
+		return "", errors.New("No MCP server named 'my-memory' found in any agent")
 	}
 	if len(args) >= 2 && args[0] == "mcp" && args[1] == "add" {
 		if r.listOut == nil {
@@ -118,7 +126,10 @@ func (f *fixture) backups(t *testing.T) []string {
 }
 
 func (f *fixture) allCLIs() {
-	for _, cli := range []string{"claude", "codex", "gemini", "opencode", "hermes", "cursor-agent", "omp"} {
+	for _, cli := range []string{
+		"claude", "codex", "gemini", "opencode", "hermes", "cursor-agent", "omp",
+		"kiro-cli", "qoder",
+	} {
 		f.look[cli] = true
 	}
 }
@@ -374,14 +385,98 @@ func TestApplyMCPRegistersServers(t *testing.T) {
 	}
 
 	// Idempotent rerun: files detected as installed, claude now listed.
+	beforeRerun := len(f.rec.calls)
 	_, out2, _ := f.run(t, "--mcp", "--yes")
 	if !strings.Contains(out2, "cursor: มีอยู่แล้ว ข้าม") || !strings.Contains(out2, "omp: มีอยู่แล้ว ข้าม") {
 		t.Errorf("second run did not skip installed file configs: %s", out2)
 	}
-	for _, c := range f.rec.calls[len(f.rec.calls)/2:] { // calls after rerun began
+	for _, c := range f.rec.calls[beforeRerun:] {
 		if strings.HasPrefix(c, "claude mcp add") {
 			t.Errorf("claude add repeated after registry listed my-memory: %s", c)
 		}
+	}
+}
+
+// kiro and qoder keep their own MCP registries, but neither can be probed
+// with `mcp list` like claude/codex do: kiro writes that listing to stderr
+// (its probe is `mcp status --name`, exit code only) and qoder's list spawns
+// and connects to every configured server. Both are MCP-only — the hook
+// section must never touch them.
+func TestMCPKiroAndQoder(t *testing.T) {
+	f := newFixture(t)
+	f.look["kiro-cli"] = true
+	f.look["qoder"] = true
+
+	code, out, errOut := f.run(t, "--mcp", "--yes")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitOK, errOut)
+	}
+
+	wantKiro := quoteCmd("kiro-cli", []string{"mcp", "add", "--name", "my-memory", "--scope", "global",
+		"--command", f.memBin, "--args", "mcp", "--env", "MEM_AGENT=kiro"})
+	// qoder's --env is variadic: the joined form is the only one that does
+	// not swallow the positional name/command.
+	wantQoder := quoteCmd("qoder", []string{"mcp", "add", "my-memory", f.memBin, "mcp", "-s", "user", "--env=MEM_AGENT=qoder"})
+	kiroAdds, qoderAdds := 0, 0
+	for _, c := range f.rec.calls {
+		switch c {
+		case wantKiro:
+			kiroAdds++
+		case wantQoder:
+			qoderAdds++
+		}
+	}
+	if kiroAdds != 1 || qoderAdds != 1 {
+		t.Errorf("add calls: kiro=%d qoder=%d, want 1 each (calls: %v)", kiroAdds, qoderAdds, f.rec.calls)
+	}
+
+	wantProbe := quoteCmd("kiro-cli", []string{"mcp", "status", "--name", "my-memory"})
+	probed, listed := false, false
+	for _, c := range f.rec.calls {
+		switch c {
+		case wantProbe:
+			probed = true
+		case quoteCmd("kiro-cli", []string{"mcp", "list"}):
+			listed = true
+		}
+	}
+	if !probed {
+		t.Errorf("kiro probe did not use `mcp status --name`: %v", f.rec.calls)
+	}
+	if listed {
+		t.Errorf("kiro was probed with `mcp list`, whose listing goes to stderr: %v", f.rec.calls)
+	}
+
+	// Second apply: both registries report the server — no re-registration.
+	before := len(f.rec.calls)
+	_, out2, _ := f.run(t, "--mcp", "--yes")
+	if !strings.Contains(out2, "kiro: มีอยู่แล้ว ข้าม") || !strings.Contains(out2, "qoder: มีอยู่แล้ว ข้าม") {
+		t.Errorf("re-run did not skip kiro/qoder: %s", out2)
+	}
+	for _, c := range f.rec.calls[before:] {
+		if strings.HasPrefix(c, "kiro-cli mcp add") || strings.HasPrefix(c, "qoder mcp add") {
+			t.Errorf("re-run registered an existing server: %s", c)
+		}
+	}
+
+	// MCP-only: a full apply must not create any kiro/qoder hook config.
+	if code, _, _ := f.run(t, "--all", "--yes"); code != ExitOK {
+		t.Fatalf("--all exit = %d, want %d", code, ExitOK)
+	}
+	err := filepath.Walk(f.home, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.Contains(path, "kiro") || strings.Contains(path, "qoder") {
+			t.Errorf("hook/asset file written for an MCP-only harness: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "kiro") || !strings.Contains(out, "qoder") {
+		t.Errorf("plan did not report kiro/qoder: %s", out)
 	}
 }
 
