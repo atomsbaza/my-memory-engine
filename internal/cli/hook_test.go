@@ -6,9 +6,12 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/atomsbaza/my-memory-engine/internal/hook"
 )
 
 // payload is a claude-style hook payload (query + session at the top level).
@@ -160,7 +163,7 @@ func TestHookFormats(t *testing.T) {
 // the turn alive instead of printing nothing.
 func TestEmitHookEmptyCursorContinue(t *testing.T) {
 	var sb strings.Builder
-	emitHook(&sb, "cursor", "beforeSubmitPrompt", "")
+	hook.Emit(&sb, hook.FormatCursor, "beforeSubmitPrompt", "")
 	var doc struct {
 		Continue bool `json:"continue"`
 	}
@@ -168,7 +171,7 @@ func TestEmitHookEmptyCursorContinue(t *testing.T) {
 		t.Fatalf("empty cursor beforeSubmitPrompt = %q, want continue:true", sb.String())
 	}
 	sb.Reset()
-	emitHook(&sb, "cursor", "SessionStart", "")
+	hook.Emit(&sb, hook.FormatCursor, "SessionStart", "")
 	if sb.String() != "" {
 		t.Fatalf("empty SessionStart emitted %q, want nothing", sb.String())
 	}
@@ -236,6 +239,139 @@ func TestHookUsageErrors(t *testing.T) {
 		code, out, stderr := runMain(t, "", argv...)
 		if code != ExitGuard {
 			t.Errorf("%v: exit = %d, want %d (stdout %q, stderr %q)", argv, code, ExitGuard, out, stderr)
+		}
+	}
+}
+
+// gitShim installs a fake git ahead of PATH that records every invocation and
+// optionally fails one subcommand. It is how the stop hook's git behaviour is
+// asserted on the real process: what ran, in which order, and whether any
+// remote-writing subcommand appeared (AC-P2-11).
+func gitShim(t *testing.T, failing string) func() []string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	logPath := filepath.Join(t.TempDir(), "git-calls.log")
+	dir := t.TempDir()
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\n")
+	script.WriteString("printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n")
+	if failing != "" {
+		script.WriteString("if [ \"$1\" = " + shellQuote(failing) + " ]; then echo fake-git-failure >&2; exit 1; fi\n")
+	}
+	script.WriteString("exec " + shellQuote(realGit) + " \"$@\"\n")
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script.String()), 0o755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() []string {
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			t.Fatalf("read git calls: %v", err)
+		}
+		var out []string
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) != "" {
+				out = append(out, line)
+			}
+		}
+		return out
+	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// remoteWrite reports whether a recorded git invocation writes to a remote.
+func remoteWrite(call string) bool {
+	fields := strings.Fields(call)
+	return len(fields) > 0 && (fields[0] == "push" || fields[0] == "pull" || fields[0] == "fetch")
+}
+
+// TestHookStopNeverPushes: the stop hook runs add/commit but nothing that
+// talks to a remote, asserted on the argv the fake git actually received.
+func TestHookStopNeverPushes(t *testing.T) {
+	home := fixtureHome(t)
+	calls := gitShim(t, "")
+	writeFile(t, home, "lessons/hook-stop-push.ffff0001.md", `---
+id: lesson.ffff0001
+title: hook stop never pushes
+layer: lesson
+scope: global
+tags: []
+confidence: 0.9
+source: agent:test
+created: 2026-01-01
+last_used: 2026-01-01
+expires: none
+status: active
+sensitivity: internal
+---
+
+**Rule.** stop hook commits locally and never pushes.
+`)
+	code, out, stderr := runHome(t, home, "", "hook", "--event", "stop", "--agent", "claude")
+	mustCode(t, ExitOK, code, out, stderr, "hook stop")
+	if out != "" {
+		t.Fatalf("stop hook wrote to stdout: %q", out)
+	}
+	seenCommit := false
+	for _, call := range calls() {
+		if remoteWrite(call) {
+			t.Fatalf("stop hook reached the network: %q", call)
+		}
+		if strings.HasPrefix(call, "commit") {
+			seenCommit = true
+		}
+	}
+	if !seenCommit {
+		t.Fatalf("stop hook never committed; git calls = %q", calls())
+	}
+}
+
+// TestHookStopGitFailureFailOpen: a failing commit still exits 0 and leaves one
+// observable line under .memory/runtime.log (AC-P2-11).
+func TestHookStopGitFailureFailOpen(t *testing.T) {
+	home := fixtureHome(t)
+	calls := gitShim(t, "commit")
+	writeFile(t, home, "lessons/hook-stop-fail.beef0001.md", `---
+id: lesson.beef0001
+title: hook stop fail-open
+layer: lesson
+scope: global
+tags: []
+confidence: 0.9
+source: agent:test
+created: 2026-01-01
+last_used: 2026-01-01
+expires: none
+status: active
+sensitivity: internal
+---
+
+**Rule.** a failing git commit must not break the turn.
+`)
+	code, out, stderr := runHome(t, home, "", "hook", "--event", "stop", "--agent", "claude")
+	mustCode(t, ExitOK, code, out, stderr, "hook stop with a failing git")
+	if !strings.Contains(stderr, "fail-open") {
+		t.Fatalf("stderr = %q, want the fail-open note", stderr)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".memory", "runtime.log"))
+	if err != nil {
+		t.Fatalf("runtime log missing: %v", err)
+	}
+	if !strings.Contains(string(data), "hook stop fail-open") {
+		t.Fatalf("runtime log = %q, want one fail-open line", data)
+	}
+	for _, call := range calls() {
+		if remoteWrite(call) {
+			t.Fatalf("stop hook reached the network on the failure path: %q", call)
 		}
 	}
 }
