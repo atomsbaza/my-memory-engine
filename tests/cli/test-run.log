@@ -1,0 +1,20 @@
+=== RUN   TestHelpExitsZero
+--- PASS: TestHelpExitsZero (0.00s)
+=== RUN   TestHelpListsAllCommands
+--- PASS: TestHelpListsAllCommands (0.00s)
+=== RUN   TestStubCommandsReturnZero
+--- PASS: TestStubCommandsReturnZero (0.00s)
+=== RUN   TestStubCommandIgnoresExtraArgs
+--- PASS: TestStubCommandIgnoresExtraArgs (0.00s)
+=== RUN   TestUnknownCommand
+--- PASS: TestUnknownCommand (0.00s)
+=== RUN   TestHomeFlagAccepted
+--- PASS: TestHomeFlagAccepted (0.00s)
+=== RUN   TestHomeFlagRequiresValue
+--- PASS: TestHomeFlagRequiresValue (0.00s)
+=== RUN   TestExitCodeConstants
+--- PASS: TestExitCodeConstants (0.00s)
+PASS
+ok  	github.com/atomsbaza/my-memory-engine/internal/cli	0.158s
+?   	github.com/atomsbaza/my-memory-engine/cmd/mem	[no test files]
+exit=0

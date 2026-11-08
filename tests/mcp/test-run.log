@@ -1,0 +1,11 @@
+=== RUN   TestInitializeHandshake
+--- PASS: TestInitializeHandshake (0.00s)
+=== RUN   TestToolsListNineFrozenTools
+--- PASS: TestToolsListNineFrozenTools (0.00s)
+=== RUN   TestToolCallStub
+--- PASS: TestToolCallStub (0.00s)
+=== RUN   TestRequiredArgsEnforced
+--- PASS: TestRequiredArgsEnforced (0.00s)
+PASS
+ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	0.160s
+exit=0
