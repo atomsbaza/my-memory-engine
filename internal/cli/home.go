@@ -3,10 +3,8 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,14 +14,6 @@ import (
 	"github.com/atomsbaza/my-memory-engine/internal/schema"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
 )
-
-// recallLogRel is the append-only injection/usage log (Python log_event):
-// ops/ has file_mode append-only, so it is not a record layer.
-const recallLogRel = "ops/recall-log.jsonl"
-
-// runtimeLogRel is the gitignored engine runtime log (store's commit failures
-// and the hook fail-open lines land here; never in the committed ops/ tree).
-const runtimeLogRel = ".memory/runtime.log"
 
 // today is the ISO date used for last_used/created (Python TODAY).
 func today() string { return time.Now().Format("2006-01-02") }
@@ -113,25 +103,10 @@ func (e *Env) contextText(root string, o contextRequest) (string, []store.Record
 
 // logEvent appends one JSONL row to ops/recall-log.jsonl. Callers decide how
 // loud a failure is: the hook fail-opens (REQ-HOOK-02) while a CLI command
-// reports it on stderr without changing its exit code.
+// reports it on stderr without changing its exit code. The writer itself is
+// domain.LogEvent so the MCP entrypoint records byte-identical rows.
 func logEvent(root string, row map[string]any) error {
-	path := filepath.Join(root, filepath.FromSlash(recallLogRel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("recall log: %w", err)
-	}
-	data, err := json.Marshal(row)
-	if err != nil {
-		return fmt.Errorf("recall log: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("recall log: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("recall log: %w", err)
-	}
-	return nil
+	return domain.LogEvent(root, row)
 }
 
 // appendRuntimeLog writes one observable fail-open line under .memory/ (the
@@ -139,16 +114,7 @@ func logEvent(root string, row map[string]any) error {
 // a failure path and must not lose the user's work over its own logging
 // (REQ-HOOK-02).
 func appendRuntimeLog(root, line string) {
-	path := filepath.Join(root, filepath.FromSlash(runtimeLogRel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s %s\n", nowStamp(), line)
+	_ = store.LogRuntime(root, nowStamp()+" "+line)
 }
 
 // agentEnv is the harness identity used in log rows (Python MEM_AGENT).

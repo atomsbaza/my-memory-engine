@@ -47,6 +47,62 @@ type SelectOptions struct {
 	// computation, so multi-layer selection queries the ranks once.
 	FTSIDs []string
 	VecIDs []string
+
+	// Breakdown, when non-nil, receives the RRF fusion internals of this call
+	// (Python select(..., breakdown=info)) so debug surfaces (memory_trace,
+	// search --scores) print the very numbers the ranking used. It is filled
+	// only when the query has tokens — the same condition that enables RRF.
+	Breakdown *Breakdown
+}
+
+// RRFParams holds the fusion constants SelectFrom uses: every fused list
+// contributes weight/(K+rank) (Python RRF_K / RRF_W_*).
+type RRFParams struct {
+	K       float64
+	WFTS    float64
+	WVector float64
+	WScored float64
+}
+
+// RRF returns the fusion constants of the RRF step.
+func RRF() RRFParams {
+	return RRFParams{K: rrfK, WFTS: rrfWFTS, WVector: rrfWVector, WScored: rrfWScored}
+}
+
+// RankInfo is a record's 1-based rank in each fused list; 0 means the record
+// is absent from that list (Python's missing ranks key).
+type RankInfo struct {
+	FTS    int
+	Vec    int
+	Scored int
+}
+
+// Breakdown is one SelectFrom call's RRF fusion (Python rrf_breakdown):
+// the score each candidate contributed and its rank in each list.
+type Breakdown struct {
+	RRF   map[string]float64
+	Ranks map[string]RankInfo
+}
+
+// fill writes the fusion result into b (Python rrf_breakdown's ranks dict).
+func (b *Breakdown) fill(fts, vec, scored []string, rrf map[string]float64) {
+	b.RRF = rrf
+	b.Ranks = make(map[string]RankInfo, len(fts)+len(vec))
+	for i, id := range fts {
+		r := b.Ranks[id]
+		r.FTS = i + 1
+		b.Ranks[id] = r
+	}
+	for i, id := range vec {
+		r := b.Ranks[id]
+		r.Vec = i + 1
+		b.Ranks[id] = r
+	}
+	for i, id := range scored {
+		r := b.Ranks[id]
+		r.Scored = i + 1
+		b.Ranks[id] = r
+	}
 }
 
 func (o *SelectOptions) weights() schema.Scoring {
@@ -208,6 +264,9 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 			scoredIDs = append(scoredIDs, r.ID)
 		}
 		rrf := rrfBreakdown(fts50, vec50, scoredIDs)
+		if o.Breakdown != nil {
+			o.Breakdown.fill(fts50, vec50, scoredIDs, rrf)
+		}
 		sort.SliceStable(hits, func(i, j int) bool {
 			ri, rj := rrf[hits[i].ID], rrf[hits[j].ID]
 			if ri != rj {

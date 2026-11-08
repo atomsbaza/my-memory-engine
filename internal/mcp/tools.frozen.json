@@ -1,0 +1,245 @@
+[
+  {
+    "name": "memory_context",
+    "description": "ดึงความจำที่เกี่ยวข้องกับงาน (rules + project + lessons + decisions + handoffs) ตาม budget — เรียกตอนเริ่มงานหรือเมื่อเปลี่ยนงาน",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "งานที่กำลังจะทำ"
+        },
+        "project": {
+          "type": "string",
+          "description": "ชื่อ project ใน my-memory/projects"
+        },
+        "scope": {
+          "type": "string",
+          "description": "global | project:<Name> | repo:<owner/name>"
+        },
+        "budget": {
+          "type": "integer",
+          "description": "chars สูงสุด (default ตาม taxonomy)"
+        },
+        "no_touch": {
+          "type": "boolean",
+          "description": "true = ไม่อัปเดต last_used"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_search",
+    "description": "ค้น record ด้วยคำค้น (FTS + ranking) คืน id / layer / บรรทัดแรก",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "rule",
+            "project",
+            "lesson",
+            "decision",
+            "handoff",
+            "knowledge"
+          ]
+        },
+        "scope": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 8
+        },
+        "include_inactive": {
+          "type": "boolean",
+          "description": "รวม superseded/archived"
+        },
+        "scores": {
+          "type": "boolean",
+          "description": "true = แสดง rrf_score/fts_rank/vec_rank/score_rank ต่อผล (debug retrieval)"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_show",
+    "description": "เปิด record เต็ม (frontmatter + body) ด้วย id",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_add",
+    "description": "เขียน record ใหม่ (1 record = 1 fact) · lesson ต้องมี **Rule.**/**NOT.**/**Evidence.** · ระบบกันซ้ำ + กัน secret/absolute path ให้อัตโนมัติ",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "body ของ record (markdown)"
+        },
+        "layer": {
+          "type": "string",
+          "default": "lesson",
+          "enum": [
+            "lesson",
+            "decision",
+            "handoff",
+            "project",
+            "knowledge"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "default": "global"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "string",
+          "description": "0.0-1.0 · ต่ำกว่า 1.0 ต้องมี evidence"
+        },
+        "decay": {
+          "type": "number",
+          "description": "0.0-1.0 (default 1.0)"
+        },
+        "half_life": {
+          "type": "string",
+          "description": "14d | 30d | inf"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expires": {
+          "type": "string",
+          "description": "none | YYYY-MM-DD | +21d (handoff ต้องมี)"
+        },
+        "supersedes": {
+          "type": "string",
+          "description": "id ของ record เดิมที่เป็นเรื่องเดียวกัน"
+        },
+        "supersede": {
+          "type": "boolean",
+          "description": "true = แทนที่ record ที่ซ้ำโดยอัตโนมัติ"
+        },
+        "source": {
+          "type": "string",
+          "description": "default = agent ของ harness ที่เรียก"
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "private",
+            "quarantine"
+          ]
+        },
+        "force": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_list",
+    "description": "ไล่รายการ record (id, layer, scope, created, title)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 40
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_verify",
+    "description": "ตรวจสุขภาพ memory (schema/secret/path/dup/index) — รันหลังเขียนหลาย record",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "memory_stats",
+    "description": "สถิติ + ความครอบคลุมของแต่ละ harness (ใครเคยเขียน record บ้าง)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "memory_sync",
+    "description": "commit (+ pull --rebase + push) ความจำขึ้น remote — ใช้เมื่อจบงานและมี network",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "no_push": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_trace",
+    "description": "debug retrieval — RRF breakdown (rrf_score + fts/vec/scored ranks) ของ query พร้อม decay/half_life และประมาณการ budget ต่อ layer",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 10
+        }
+      }
+    }
+  }
+]

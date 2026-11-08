@@ -226,7 +226,11 @@ func cmdMCP(env *Env, c command, argv []string) int {
 	if *agent != "" {
 		os.Setenv("MEM_AGENT", *agent)
 	}
-	if err := mcp.RunStdio(context.Background()); err != nil {
+	root, err := env.root()
+	if err != nil {
+		return env.fail(err)
+	}
+	if err := mcp.RunStdio(context.Background(), mcp.Options{Root: root, Agent: *agent}); err != nil {
 		fmt.Fprintf(env.Stderr, "mem: mcp server: %v\n", err)
 		return ExitError
 	}

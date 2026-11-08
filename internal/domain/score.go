@@ -167,6 +167,51 @@ func halfLifeDays(rec store.Record) float64 {
 	return 14.0
 }
 
+// HalfLifeDays exposes a record's half-life in days (Python
+// Rec.half_life_days) for the debug surfaces: +Inf for rules and explicit
+// "inf", the layer default otherwise.
+func HalfLifeDays(rec store.Record) float64 { return halfLifeDays(rec) }
+
+// urgentTagFragments mirrors Python URGENT_TAG_FRAGMENTS: a record whose tags
+// mention security work decays slower (urgency multiplier 1.5).
+var urgentTagFragments = []string{"security", "guard", "safety"}
+
+// RetentionScore is Python retention_score:
+//
+//	S = decay · 2^(−days_since_last_used / half_life) · (1+ln(1+uses)) · urgency
+//
+// days is clamped at 0, so a record last used today is not penalised; an
+// unparsable or absent last_used counts as today.
+func RetentionScore(rec store.Record) float64 {
+	days := 0
+	if v, ok := rec.Front["last_used"]; ok {
+		if t, err := time.Parse("2006-01-02", strings.TrimSpace(scalarString(v))); err == nil {
+			now := timeNow()
+			// Civil-date difference in UTC so a DST change cannot shift the day.
+			a := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+			b := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+			days = int(a.Sub(b) / (24 * time.Hour))
+			if days < 0 {
+				days = 0
+			}
+		}
+	}
+	hl := halfLifeDays(rec)
+	falloff := 1.0
+	if !math.IsInf(hl, 1) {
+		falloff = math.Pow(2, -float64(days)/hl)
+	}
+	urgency := 1.0
+	tags := strings.ToLower(strings.Join(rec.Tags, " "))
+	for _, frag := range urgentTagFragments {
+		if strings.Contains(tags, frag) {
+			urgency = 1.5
+			break
+		}
+	}
+	return rec.Decay * falloff * (1.0 + math.Log(1+float64(rec.Uses))) * urgency
+}
+
 // scalarString renders a front-matter scalar the way Python str() would;
 // unparsable renders (bools, lists) make downstream float parses fail the
 // same way Python's would.

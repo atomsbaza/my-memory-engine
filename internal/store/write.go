@@ -350,6 +350,17 @@ func WithLock(root string, fn func() error) error {
 const runtimeLogName = ".memory/runtime.log"
 
 func appendRuntimeLog(root, rel string, reason error) error {
+	line := time.Now().Format(time.RFC3339) + "\tcommit-failed\t" + rel + "\t" +
+		truncRunes(firstLine(reason.Error()), 200)
+	return LogRuntime(root, line)
+}
+
+// LogRuntime appends one observable, non-fatal line to the home's
+// .memory/runtime.log — the same gitignored channel a failed commit uses. It
+// is exported for the entrypoints that must keep stdout clean (MCP, hooks) but
+// still cannot swallow a diagnostic (REQ-HOOK-02, NFR-OPS-01). The caller owns
+// the timestamp/prefix so each writer keeps its own line shape.
+func LogRuntime(root, line string) error {
 	dir := filepath.Join(root, ".memory")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
@@ -360,9 +371,7 @@ func appendRuntimeLog(root, rel string, reason error) error {
 		return fmt.Errorf("open runtime log: %w", err)
 	}
 	defer f.Close()
-	line := time.Now().Format(time.RFC3339) + "\tcommit-failed\t" + rel + "\t" +
-		truncRunes(firstLine(reason.Error()), 200) + "\n"
-	if _, err := f.WriteString(line); err != nil {
+	if _, err := f.WriteString(line + "\n"); err != nil {
 		return fmt.Errorf("append runtime log: %w", err)
 	}
 	return nil

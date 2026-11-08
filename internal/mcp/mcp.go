@@ -1,25 +1,34 @@
-// Package mcp implements the MCP stdio server (design §6 "mcp" row):
-// the 9 frozen tools (plan OQ5 — additive-only compatibility premise)
-// served over github.com/modelcontextprotocol/go-sdk.
+// Package mcp implements the MCP stdio server (design §6 "mcp" row): the 9
+// frozen tools (plan OQ5 — additive-only compatibility premise) served over
+// github.com/modelcontextprotocol/go-sdk and wired to the same
+// domain/store/index layer the CLI uses (design §5: every entrypoint calls one
+// domain layer).
 //
-// This is the P1 skeleton: server identity, the 9-tool registry, input
-// schemas and the stdio transport are final; tool bodies are stubs that
-// return a text result. Domain wiring lands in P2.3 (plan.md P2.3
-// "MCP stdio SDK adapter, 9 frozen tools"), where the emitted tools/list
-// snapshot must match the frozen baseline byte-for-byte.
+// The tool list, the descriptions and every input schema come from
+// tools.frozen.json — a verbatim copy of the Python baseline's MCP_TOOLS
+// (bin/mem) restricted to the 9 frozen names. Each schema is handed to the SDK
+// unconverted, so tools/list emits the frozen document itself; tests/mcp pins
+// the emitted list against that snapshot (P2.3 contract test).
 //
-// Stdout purity (design §6; S2/B4 spike class of failure): the package
-// itself never writes to os.Stdout — every byte on stdout comes from the
-// SDK's JSON-RPC framing, and the server is constructed without a logger
-// so no diagnostics can leak into the stream. Anything a future handler
-// needs to report goes into the tool result, never into print calls.
+// Stdout purity (design §6; the S2/B4 spike class of failure): this package
+// never writes to os.Stdout. Every stdout byte is SDK JSON-RPC framing — the
+// server is built without a logger, tool output goes into the result, and a
+// diagnostic that must stay observable goes to the home's
+// .memory/runtime.log, the channel the store already uses for failed commits.
 package mcp
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/atomsbaza/my-memory-engine/internal/store"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Server identity — MCP_SERVER_NAME/MCP_VERSION in the Python baseline.
@@ -44,158 +53,178 @@ var ToolNames = []string{
 	"memory_trace",
 }
 
-// ---------------------------------------------------------------------------
-// Input schemas — structs mirroring the frozen Python MCP_TOOLS inputSchema
-// for each tool. AddTool infers the JSON Schema from these; required fields
-// are the non-pointer fields without omitempty, matching the baseline's
-// "required" lists.
-// ---------------------------------------------------------------------------
-
-// ContextArgs is memory_context's schema: budgeted retrieval by task.
-type ContextArgs struct {
-	Query   string `json:"query,omitempty" jsonschema:"งานที่กำลังจะทำ"`
-	Project string `json:"project,omitempty" jsonschema:"ชื่อ project ใน my-memory/projects"`
-	Scope   string `json:"scope,omitempty" jsonschema:"global | project:<Name> | repo:<owner/name>"`
-	Budget  int    `json:"budget,omitempty" jsonschema:"chars สูงสุด (default ตาม taxonomy)"`
-	NoTouch bool   `json:"no_touch,omitempty" jsonschema:"true = ไม่อัปเดต last_used"`
+// Options configures one MCP server instance.
+type Options struct {
+	// Root is the resolved memory home. Empty means store.FindRoot() (env +
+	// upward walk), exactly like the CLI's default resolution.
+	Root string
+	// Agent names the harness this server speaks for (CLI --agent). Empty
+	// falls back to $MEM_AGENT, then to "agent:mcp" as the record source.
+	Agent string
 }
-
-// SearchArgs is memory_search's schema: query is required.
-type SearchArgs struct {
-	Query           string `json:"query" jsonschema:"คำค้น"`
-	Layer           string `json:"layer,omitempty" jsonschema:"rule | project | lesson | decision | handoff | knowledge"`
-	Scope           string `json:"scope,omitempty"`
-	Limit           int    `json:"limit,omitempty" jsonschema:"default 8"`
-	IncludeInactive bool   `json:"include_inactive,omitempty" jsonschema:"รวม superseded/archived"`
-	Scores          bool   `json:"scores,omitempty" jsonschema:"true = แสดง rrf_score/fts_rank/vec_rank/score_rank"`
-}
-
-// ShowArgs is memory_show's schema: id is required.
-type ShowArgs struct {
-	ID string `json:"id" jsonschema:"id ของ record"`
-}
-
-// AddArgs is memory_add's schema: text is required.
-type AddArgs struct {
-	Text        string   `json:"text" jsonschema:"body ของ record (markdown)"`
-	Layer       string   `json:"layer,omitempty" jsonschema:"lesson | decision | handoff | project | knowledge (default lesson)"`
-	Scope       string   `json:"scope,omitempty" jsonschema:"default global"`
-	Title       string   `json:"title,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Confidence  string   `json:"confidence,omitempty" jsonschema:"0.0-1.0 · ต่ำกว่า 1.0 ต้องมี evidence"`
-	Decay       float64  `json:"decay,omitempty" jsonschema:"0.0-1.0 (default 1.0)"`
-	HalfLife    string   `json:"half_life,omitempty" jsonschema:"14d | 30d | inf"`
-	Evidence    []string `json:"evidence,omitempty"`
-	Expires     string   `json:"expires,omitempty" jsonschema:"none | YYYY-MM-DD | +21d (handoff ต้องมี)"`
-	Supersedes  string   `json:"supersedes,omitempty" jsonschema:"id ของ record เดิมที่เป็นเรื่องเดียวกัน"`
-	Supersede   bool     `json:"supersede,omitempty" jsonschema:"true = แทนที่ record ที่ซ้ำโดยอัตโนมัติ"`
-	Source      string   `json:"source,omitempty" jsonschema:"default = agent ของ harness ที่เรียก"`
-	Sensitivity string   `json:"sensitivity,omitempty" jsonschema:"public | internal | private | quarantine"`
-	Force       bool     `json:"force,omitempty"`
-}
-
-// ListArgs is memory_list's schema.
-type ListArgs struct {
-	Layer string `json:"layer,omitempty"`
-	Scope string `json:"scope,omitempty"`
-	Limit int    `json:"limit,omitempty" jsonschema:"default 40"`
-}
-
-// VerifyArgs is memory_verify's schema: no parameters.
-type VerifyArgs struct{}
-
-// StatsArgs is memory_stats's schema: no parameters.
-type StatsArgs struct{}
-
-// SyncArgs is memory_sync's schema.
-type SyncArgs struct {
-	Message string `json:"message,omitempty"`
-	NoPush  bool   `json:"no_push,omitempty"`
-}
-
-// TraceArgs is memory_trace's schema: query is required.
-type TraceArgs struct {
-	Query string `json:"query" jsonschema:"คำค้นที่ต้องการ debug"`
-	Scope string `json:"scope,omitempty"`
-	Limit int    `json:"limit,omitempty" jsonschema:"default 10"`
-}
-
-// ---------------------------------------------------------------------------
-// Server construction
-// ---------------------------------------------------------------------------
 
 // NewServer builds the my-memory MCP server with the 9 frozen tools
-// registered. Handlers are stubs until P2.3: each returns a text result
-// naming the tool, which keeps the initialize/tools/list/tools/call
-// contract exercisable end-to-end before the domain exists.
-func NewServer() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: Version}, nil)
+// registered. Every handler is wired to the domain layer; the initialize
+// handshake carries the baseline instructions text.
+func NewServer(o Options) (*mcpsdk.Server, error) {
+	root, err := resolveRoot(o.Root)
+	if err != nil {
+		return nil, err
+	}
+	agent := o.Agent
+	if agent == "" {
+		agent = os.Getenv("MEM_AGENT")
+	}
+	srv := &server{root: root, agent: agent}
 
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_context", Description: "ดึงความจำที่เกี่ยวข้องกับงาน (rules + project + lessons + decisions + handoffs) ตาม budget — เรียกตอนเริ่มงานหรือเมื่อเปลี่ยนงาน"}, handleContext)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_search", Description: "ค้น record ด้วยคำค้น (FTS + ranking) คืน id / layer / บรรทัดแรก"}, handleSearch)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_show", Description: "เปิด record เต็ม (frontmatter + body) ด้วย id"}, handleShow)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_add", Description: "เขียน record ใหม่ (1 record = 1 fact) · lesson ต้องมี Rule./NOT./Evidence. · ระบบกันซ้ำ + กัน secret/absolute path ให้อัตโนมัติ"}, handleAdd)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_list", Description: "ไล่รายการ record (id, layer, scope, created, title)"}, handleList)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_verify", Description: "ตรวจสุขภาพ memory (schema/secret/path/dup/index) — รันหลังเขียนหลาย record"}, handleVerify)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_stats", Description: "สถิติ + ความครอบคลุมของแต่ละ harness (ใครเคยเขียน record บ้าง)"}, handleStats)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_sync", Description: "commit (+ pull --rebase + push) ความจำขึ้น remote — ใช้เมื่อจบงานและมี network"}, handleSync)
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_trace", Description: "debug retrieval — RRF breakdown (rrf_score + fts/vec/scored ranks) ของ query พร้อม decay/half_life และประมาณการ budget ต่อ layer"}, handleTrace)
+	s := mcpsdk.NewServer(
+		&mcpsdk.Implementation{Name: ServerName, Version: Version},
+		&mcpsdk.ServerOptions{
+			Instructions: instructions(root, agent),
+			// The baseline advertises tools only, with no list-changed
+			// notifications (the frozen tool set never changes at runtime). The
+			// SDK would otherwise default to {"logging":{}} plus listChanged:true,
+			// advertising a stream this server never writes.
+			Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}},
+		},
+	)
 
-	return s
+	mcpsdk.AddTool(s, mustTool("memory_context"), srv.handleContext)
+	mcpsdk.AddTool(s, mustTool("memory_search"), srv.handleSearch)
+	mcpsdk.AddTool(s, mustTool("memory_show"), srv.handleShow)
+	mcpsdk.AddTool(s, mustTool("memory_add"), srv.handleAdd)
+	mcpsdk.AddTool(s, mustTool("memory_list"), srv.handleList)
+	mcpsdk.AddTool(s, mustTool("memory_verify"), srv.handleVerify)
+	mcpsdk.AddTool(s, mustTool("memory_stats"), srv.handleStats)
+	mcpsdk.AddTool(s, mustTool("memory_sync"), srv.handleSync)
+	mcpsdk.AddTool(s, mustTool("memory_trace"), srv.handleTrace)
+
+	return s, nil
 }
 
 // RunStdio serves the 9 tools on the MCP stdio transport (os.Stdin /
-// os.Stdout, newline-delimited JSON-RPC — the SDK owns both streams).
-func RunStdio(ctx context.Context) error {
-	return NewServer().Run(ctx, &mcp.StdioTransport{})
-}
-
-// ---------------------------------------------------------------------------
-// Stub handlers — P2.3 replaces each with a domain call. They share
-// stubResult so callers can see the skeleton is live and which tool ran.
-// ---------------------------------------------------------------------------
-
-func handleContext(ctx context.Context, req *mcp.CallToolRequest, args ContextArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_context"), nil, nil
-}
-
-func handleSearch(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_search"), nil, nil
-}
-
-func handleShow(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_show"), nil, nil
-}
-
-func handleAdd(ctx context.Context, req *mcp.CallToolRequest, args AddArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_add"), nil, nil
-}
-
-func handleList(ctx context.Context, req *mcp.CallToolRequest, args ListArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_list"), nil, nil
-}
-
-func handleVerify(ctx context.Context, req *mcp.CallToolRequest, args VerifyArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_verify"), nil, nil
-}
-
-func handleStats(ctx context.Context, req *mcp.CallToolRequest, args StatsArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_stats"), nil, nil
-}
-
-func handleSync(ctx context.Context, req *mcp.CallToolRequest, args SyncArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_sync"), nil, nil
-}
-
-func handleTrace(ctx context.Context, req *mcp.CallToolRequest, args TraceArgs) (*mcp.CallToolResult, any, error) {
-	return stubResult("memory_trace"), nil, nil
-}
-
-// stubResult is the single text result every stub returns.
-func stubResult(name string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: fmt.Sprintf("%s: stub — wired to internal/domain in P2.3", name)},
-		},
+// os.Stdout, newline-delimited JSON-RPC — the SDK owns both streams). A home
+// that cannot be resolved fails here, before anything is served, instead of
+// turning every tool call into the same error.
+func RunStdio(ctx context.Context, o Options) error {
+	s, err := NewServer(o)
+	if err != nil {
+		return err
 	}
+	return s.Run(ctx, &mcpsdk.StdioTransport{})
+}
+
+// resolveRoot resolves the memory home for one server instance.
+func resolveRoot(root string) (string, error) {
+	if root == "" {
+		resolved, err := store.FindRoot()
+		if err != nil {
+			return "", err
+		}
+		return resolved, nil
+	}
+	return store.ExpandPath(root)
+}
+
+// ---------------------------------------------------------------------------
+// Handshake instructions — the frozen mcp_instructions() text
+// ---------------------------------------------------------------------------
+
+// instructionsFmt is Python mcp_instructions() verbatim; the two %s slots are
+// the CLI path and the source an add should use.
+const instructionsFmt = "นี่คือ my-memory — ความจำถาวรของผู้ใช้ ข้าม harness อ่าน/เขียนชุดเดียวกัน\n" +
+	"(private git repo `~/my-memory` · CLI `%s`)\n" +
+	"\n" +
+	"ก่อนเริ่มงาน: เรียก memory_context ด้วย query = งานที่กำลังทำ (หรือ memory_search)\n" +
+	"- `Rules` = กฎที่ต้องปฏิบัติตาม · Lessons/Decisions/Handoffs = ข้อเท็จจริงในอดีต\n" +
+	"  ใช้เป็นบริบทเท่านั้น ห้าม re-execute งานเก่า\n" +
+	"- ถ้าจำเป็นต้องดูกฎเต็ม: memory_search layer=rule\n" +
+	"\n" +
+	"เมื่อจบงาน: ถ้าได้บทเรียน/ข้อตัดสินใจ/สถานะงานที่คุ้มค่า ให้เก็บด้วย memory_add\n" +
+	"- 1 record = 1 fact · lesson ต้องมี Rule/NOT./Evidence\n" +
+	"- source ควรเป็น %s\n" +
+	"- ห้ามใส่ secret/token/ข้อมูลส่วนตัว/absolute path ของเครื่อง (ใช้ ~)\n" +
+	"- ถ้าเป็นเรื่องเดียวกับของเดิม ให้ memory_search ก่อน แล้วใช้ supersede/supersedes ไม่ใช่เขียนซ้ำ\n" +
+	"- ดูแล lifecycle: memory_archive / memory_promote / memory_compact (ส่ง dry_run=true ก่อนเสมอ)\n" +
+	"  debug ว่าทำไม record ถึง (ไม่) ถูกเลือก: memory_trace หรือ memory_search {scores: true}\n"
+
+// instructions renders the handshake text for one harness identity.
+func instructions(root, agent string) string {
+	src := "agent:mcp"
+	if agent != "" {
+		src = "agent:" + agent
+	}
+	return fmt.Sprintf(instructionsFmt, memBinPath(root), src)
+}
+
+// memBinPath is Python mem_bin_path(): the home's bin/mem as "~/..." when it
+// lives under the user's home, the absolute path otherwise.
+func memBinPath(root string) string {
+	p := filepath.Join(root, "bin", "mem")
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, rerr := filepath.Rel(home, p); rerr == nil && !strings.HasPrefix(rel, "..") {
+			return "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(p)
+}
+
+// ---------------------------------------------------------------------------
+// Frozen tool definitions — tools.frozen.json
+// ---------------------------------------------------------------------------
+
+// frozenToolsJSON is the Python baseline's MCP_TOOLS restricted to the frozen
+// 9 (OQ5), copied verbatim: name, description and inputSchema.
+//
+//go:embed tools.frozen.json
+var frozenToolsJSON []byte
+
+// FrozenToolsJSON returns the frozen tools/list document this server serves.
+// The contract test compares the emitted tools/list against it, and
+// tools/test-mcp-contract.sh re-extracts the baseline definition to prove the
+// snapshot has not drifted.
+func FrozenToolsJSON() []byte { return frozenToolsJSON }
+
+// frozenTool is one entry of tools.frozen.json.
+type frozenTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+var (
+	frozenOnce sync.Once
+	frozenList []frozenTool
+	frozenErr  error
+)
+
+// frozenTools parses the embedded snapshot once.
+func frozenTools() ([]frozenTool, error) {
+	frozenOnce.Do(func() {
+		if err := json.Unmarshal(frozenToolsJSON, &frozenList); err != nil {
+			frozenErr = fmt.Errorf("mcp: parse tools.frozen.json: %w", err)
+		}
+	})
+	return frozenList, frozenErr
+}
+
+// mustTool builds the SDK tool definition for one frozen name. A name that is
+// missing from the snapshot means registration and the frozen document
+// diverged — a programming error, so it panics at startup instead of silently
+// serving a partial tool set.
+func mustTool(name string) *mcpsdk.Tool {
+	tools, err := frozenTools()
+	if err != nil {
+		panic(err)
+	}
+	for _, t := range tools {
+		if t.Name == name {
+			return &mcpsdk.Tool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			}
+		}
+	}
+	panic("mcp: tool missing from tools.frozen.json: " + name)
 }
