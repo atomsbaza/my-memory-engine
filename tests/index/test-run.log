@@ -1,0 +1,6 @@
+?   	github.com/atomsbaza/my-memory-engine/cmd/mem	[no test files]
+ok  	github.com/atomsbaza/my-memory-engine/internal/codec	0.334s
+ok  	github.com/atomsbaza/my-memory-engine/internal/index	0.575s
+ok  	github.com/atomsbaza/my-memory-engine/internal/schema	0.434s
+ok  	github.com/atomsbaza/my-memory-engine/internal/store	0.634s
+exit=0
