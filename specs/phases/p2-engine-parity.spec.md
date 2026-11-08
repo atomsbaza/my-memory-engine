@@ -9,7 +9,7 @@ updated: 2026-10-19
 
 ## TL;DR
 
-P2 เสร็จเมื่อ **domain lifecycle ครบ (guards/dedup/supersede/quarantine/expiry/scoring/render/cite), CLI 20 คำสั่ง, MCP 9 tools, hook 4 formats × 3 events ทำงานเท่ากับ Python baseline, differential parity ทุก command family PASS บน fresh independent real clone — แล้วปิด S5 (`n_pairs = 30`, `recall5 ≥ 0.8667`, `mrr ≥ 0.85`)**; G1–G6 ใน public CI ยังเป็น synthetic-only และ G7 ยังเป็น manual matrix
+P2 เสร็จเมื่อ **domain lifecycle ครบ (guards/dedup/supersede/quarantine/expiry/scoring/render/cite), CLI 20 คำสั่ง, MCP 13 tools, hook 4 formats × 3 events ทำงานเท่ากับ Python baseline, differential parity ทุก command family PASS บน fresh independent real clone — แล้วปิด S5 (`n_pairs = 30`, `recall5 ≥ 0.8667`, `mrr ≥ 0.85`)**; G1–G6 ใน public CI ยังเป็น synthetic-only และ G7 ยังเป็น manual matrix
 ก่อน task แรกมี checkpoint เดียวที่ข้ามไม่ได้: **OQ5 (freeze 9 MCP tools + additive-only)** — ถ้า owner เลือก breaking, `REQ-COMPAT-01` ของ `framework.spec.md` เป็นโมฆะ และ parity/cutover plan ทั้งชุดต้องกลับไป design ใหม่
 สเปกนี้ไม่ re-design และไม่ re-plan: มัน bind `REQ-*`/`NFR-*` เข้ากับ `plan.md` P2.1–P2.7 และกำหนด acceptance surface + evidence ที่ต้องอยู่บนดิสก์ · ไม่มี real corpus ใน repo นี้; artifact ที่ derive จาก corpus อยู่ใต้ `$WF/parity/P2/` เท่านั้น
 
@@ -17,7 +17,7 @@ P2 เสร็จเมื่อ **domain lifecycle ครบ (guards/dedup/sup
 
 ## 1. Phase goal
 
-ย้าย **พฤติกรรมที่ harness พึ่งอยู่** ทั้งหมดจาก Python ไป engine ใหม่โดยไม่เปลี่ยนสัญญา: domain write/read lifecycle (guards, dedup, supersede, quarantine, expiry, scoring/selection, render, cite), command surface + exit codes, MCP stdio 9 tools, hook 4 formats × 3 events, และ generic Git sync — แล้วพิสูจน์ด้วย **differential parity บนข้อมูลจริง** (คำสั่งเดียวกัน, clone เดียวกัน, diff ต่อ family) และ **recall parity S5** ที่วัดจาก golden corpus 30 คู่ใน private data repo (design §9.2 ข, §9.3 P2; plan P2.1–P2.7)
+ย้าย **พฤติกรรมที่ harness พึ่งอยู่** ทั้งหมดจาก Python ไป engine ใหม่โดยไม่เปลี่ยนสัญญา: domain write/read lifecycle (guards, dedup, supersede, quarantine, expiry, scoring/selection, render, cite), command surface + exit codes, MCP stdio 13 tools, hook 4 formats × 3 events, และ generic Git sync — แล้วพิสูจน์ด้วย **differential parity บนข้อมูลจริง** (คำสั่งเดียวกัน, clone เดียวกัน, diff ต่อ family) และ **recall parity S5** ที่วัดจาก golden corpus 30 คู่ใน private data repo (design §9.2 ข, §9.3 P2; plan P2.1–P2.7)
 
 P2 ไม่แตะ data จริงแบบ canonical: engine ใหม่เป็น shadow read-only ภายนอก clone ทดสอบ และเขียนได้เฉพาะใน clone (design §9.3 P2 "Writer of record" = Python)
 
@@ -30,7 +30,7 @@ P2 ไม่แตะ data จริงแบบ canonical: engine ใหม่�
 | E1 | P1 exit gates ผ่าน | `$WF/parity/P1/S3.md` + `S4.md` มีสถานะ `PASS` พร้อม negative control ที่เห็นแดง และ suite >0 tests (spec `p1-engine-scaffold.spec.md`) |
 | E2 | **OQ5 ถูกตอบ** (hard gate) | `$WF/parity/P2/compat-decision.md` ระบุ "freeze 9 MCP tools + additive-only" พร้อมชื่อ owner + วันที่; ถ้าเป็น breaking → P2 เป็น `BLOCKED` และ `REQ-COMPAT-01` เป็นโมฆะ (design §9.1, §12; plan P2 entry + Checkpoints ข้อ 4) |
 | E3 | S3/S4 ยังใช้ได้กับ binary ที่จะรัน P2 | sha256 ของ `$ENGINE_BIN` ตรงกับ SHA ที่ `S3.md`/`S4.md` บันทึกไว้ **หรือ** S3+S4 ถูก re-run กับ binary นี้แล้ว |
-| E4 | frozen baseline enumerations อยู่บนดิสก์ | snapshot ที่ดึงจาก Python engine พร้อม data-repo SHA: `tools/list` 9 tools, hook output 4 formats, command manifest 18 legacy (`add_parser` count) — ใช้เป็น diff target ของ parity |
+| E4 | frozen baseline enumerations อยู่บนดิสก์ | snapshot ที่ดึงจาก Python engine พร้อม data-repo SHA: `tools/list` 13 tools, hook output 4 formats, command manifest 18 legacy (`add_parser` count) — ใช้เป็น diff target ของ parity |
 | E5 | S5 baseline อ่านได้จาก private repo | `eval/golden.jsonl` (30 คู่) + `eval/baseline.json` (`recall5 = 0.8667`, `mrr = 0.85`) อยู่ใต้ data repo และเข้าถึงได้จากเครื่องที่รัน gate |
 | E6 | ไม่มี remote | `test -z "$(git -C "$ENGINE_DIR" remote)"` → exit `0` และคงเป็นเช่นนี้ตลอด P2 (NFR-RELEASE-01 partial) |
 | E7 | engine suite เขียวที่ SHA เข้า P2 | selected-language full suite → exit `0`, >0 tests |
@@ -113,14 +113,14 @@ P2 คือเฟสที่ "สัญญาเดิม" ถูกย้า�
 | **REQ-DOM-01** | scoring additive ตาม weights ใน taxonomy (override ต่อ call สำหรับ eval); select/`pick_for_query` path เดียวกันสำหรับ CLI context, hook recall และ eval; `pick_for_query` เฉพาะ lesson/decision/handoff, drop expired handoff, dedupe by id, ≤ limit; render ตาม budget + mode (`render`/`pointer` เขียน, `pull`/`tool` skip + report); cite เพิ่ม `uses` ภายใต้ exclusive lock | AC-P2-06, AC-P2-16, AC-P2-17 |
 | **REQ-CLI-01** | 20 command families; `init` scaffold home ใหม่โดยไม่แตะ home เดิม; `doctor` รายงาน file↔index↔remote consistency | AC-P2-07 |
 | **REQ-CLI-02** | exit codes `0/1/2/3` ตรงสัญญา; `stats --json`/`eval --json` เป็น JSON document เดียว ไม่ปนข้อความ | AC-P2-08 |
-| **REQ-MCP-01** | 9 tools ชื่อ/arguments เดิม, `initialize` + `instructions` + protocolVersion negotiation, `tools/list`, `tools/call`; stdout protocol-pure; เปลี่ยน schema ได้แค่ additive | AC-P2-09 |
+| **REQ-MCP-01** | 13 tools ชื่อ/arguments เดิม, `initialize` + `instructions` + protocolVersion negotiation, `tools/list`, `tools/call`; stdout protocol-pure; เปลี่ยน schema ได้แค่ additive | AC-P2-09 |
 | **REQ-HOOK-01** | 3 events × 4 formats, budget 2500/1400, payload extraction ต่อ harness (ไม่ใช้ key เดียวร่วม), gemini JSON เข้ม | AC-P2-10 |
 | **REQ-HOOK-02** | hook exit `0` ทุกกรณี (engine/git/log/index พัง), ไม่ push, ไม่ network, failure → 1 บรรทัดใน runtime log ใต้ `.memory/` (ไม่ใช่ committed `ops/`) | AC-P2-11 |
 | **REQ-INST-01** | installer dry-run เป็น default; `--yes`/TTY เท่านั้นที่เขียน; `.bak-<timestamp>` ต่อไฟล์; idempotent; refuse linked worktree; ไม่แตะ harness ที่ไม่ได้เลือก | AC-P2-12 |
 | **REQ-SYNC-01** | verify contract → refresh index → commit local → fetch → `pull --rebase --autostash` (retry ≤ 3) → push แบบไม่ `--force`; default ไม่มี remote; git CLI เท่านั้น; ไม่เก็บ credential | AC-P2-13 |
 | **REQ-SYNC-02** | conflict → หยุด, ระบุชื่อไฟล์, non-zero, ไม่ auto-merge frontmatter, ไม่ push ต่อ | AC-P2-14 |
 | **REQ-EVAL-01** | S5 บน fresh real clone (30 คู่, thresholds) + re-run ทุก engine version/config ที่อาจกระทบ retrieval รวมหลัง P4; ห้ามใช้ G1 แทน; ห้าม corpus/ผลออก public | AC-P2-16, AC-P2-17 |
-| **REQ-COMPAT-01** | freeze/parity ตาม §5: MCP 9 tools, hook 4 formats, CLI surface, record format/ids; ไม่มี versioned break ใน scope | AC-P2-01, AC-P2-09, AC-P2-10, AC-P2-15 |
+| **REQ-COMPAT-01** | freeze/parity ตาม §5: MCP 13 tools, hook 4 formats, CLI surface, record format/ids; ไม่มี versioned break ใน scope | AC-P2-01, AC-P2-09, AC-P2-10, AC-P2-15 |
 | **REQ-STORE-03** *(slice: write path)* | add path ที่ commit ล้มยังเก็บ record และรายงาน `committed: false` + reason + 1 runtime-log line — ไม่กลืน error | AC-P2-02 |
 | **NFR-PERF-01** | hook p50 ≤ 150 ms บน synthetic reference corpus; injected delay → gate แดง | AC-P2-18 |
 | **NFR-NET-01** | default path ไม่มี network call; egress เฉพาะ `sync` ที่ configure ไว้ต่อ home | AC-P2-11, AC-P2-13, AC-P2-14 |
@@ -188,7 +188,7 @@ flowchart TD
   OQ5 -->|"breaking"| STOP["BLOCKED — OQ5 breaking<br/>REQ-COMPAT-01 เป็นโมฆะ<br/>กลับไป design"]
   OQ5 -->|"freeze"| D["P2.1 domain<br/>guards/dedup/supersede/quarantine/expiry<br/>scoring/render/cite"]
   D --> CLI["P2.2 CLI 18+init+doctor<br/>exit codes + sync"]
-  CLI --> MCP["P2.3 MCP 9 tools<br/>stdio purity"]
+  CLI --> MCP["P2.3 MCP 13 tools<br/>stdio purity"]
   CLI --> HK["P2.4 hooks 4 formats x 3 events<br/>fail-open + installer"]
   MCP --> PAR["P2.5 differential parity<br/>7 families, resumable"]
   HK --> PAR
@@ -208,7 +208,7 @@ flowchart TD
 
 ```gherkin
 Given the owner's OQ5 answer recorded on disk with owner name and date
-  And a frozen tools/list snapshot of exactly 9 tools, 4 hook-format snapshots and the 18-command manifest,
+  And a frozen tools/list snapshot of exactly 13 tools, 4 hook-format snapshots and the 18-command manifest,
       each carrying the Python engine's data-repo SHA
 When P2 work begins
 Then `compat-decision.md` states freeze plus additive-only and cites the snapshot provenance
@@ -351,13 +351,13 @@ But a command that prints a log line before its JSON makes the parse fail
 **Command + expected:** integration tests → exit `0`; `"$ENGINE_BIN" stats --json | jq -e . >/dev/null` → exit `0`
 **Discriminating control:** control build พิมพ์ข้อความก่อน JSON → parse fail
 
-### AC-P2-09 · MCP 9 tools frozen + stdio protocol-pure
+### AC-P2-09 · MCP 13 tools frozen + stdio protocol-pure
 
 **Proves:** REQ-MCP-01 · REQ-COMPAT-01 · NFR-COMPAT-01
 **Plan task:** `plan.md` P2.3 · **Gate:** **RK3** + G7 precursor
 
 ```gherkin
-Given the frozen tools/list snapshot with 9 tools and the documented instructions
+Given the frozen tools/list snapshot with 13 tools and the documented instructions
 When an MCP client connects over stdio, negotiates protocolVersion, lists tools and calls each tool
 Then the emitted schema snapshot diffs to zero against the frozen snapshot
   And every stdout line parses as a protocol frame with no banner, warning or log line
@@ -366,7 +366,7 @@ Then the emitted schema snapshot diffs to zero against the frozen snapshot
 But dropping a tool, renaming an argument, or printing one log line to stdout makes this criterion fail
 ```
 
-**Command + expected:** `cd "$ENGINE_DIR" && ./tools/test-mcp-contract.sh` → exit `0`; 9/9 tools; snapshot diff = 0
+**Command + expected:** `cd "$ENGINE_DIR" && ./tools/test-mcp-contract.sh` → exit `0`; 13/13 tools; snapshot diff = 0
 **Discriminating control:** control build ที่ตัด 1 tool ออกจาก `tools/list` → tools-count assertion แดง
 
 ### AC-P2-10 · Hook 3 events × 4 formats + per-harness payload extraction
@@ -567,9 +567,9 @@ But adding a corpus-derived fixture to the tree, or presenting G1 as recall pari
 // LANGUAGE-NEUTRAL SKELETON — transliterate to the selected language.
 // ===========================================================================
 test "P2/compat decision is freeze and snapshots have provenance" {
-    // Given: the OQ5 answer with owner and date; frozen 9-tool, 4-format, 18-command snapshots
+    // Given: the OQ5 answer with owner and date; frozen 13-tool, 4-format, 18-command snapshots
     // When:  the decision file and snapshots are read
-    // Then:  the decision is freeze + additive-only, provenance SHA is present, and 9 tools are listed
+    // Then:  the decision is freeze + additive-only, provenance SHA is present, and 13 tools are listed
     //        (assertion — to be implemented)
     // And (negative control): an 8-tool snapshot fails the count check; a breaking answer blocks P2
     //        (assertion — to be implemented)
@@ -691,13 +691,13 @@ test "P2/exit codes are 0 1 2 3 and --json output is a single document" {
 
 ```text
 // ===========================================================================
-// AC-P2-09 · MCP 9 tools frozen, stdout protocol-pure
+// AC-P2-09 · MCP 13 tools frozen, stdout protocol-pure
 // LANGUAGE-NEUTRAL SKELETON — transliterate to the selected language.
 // ===========================================================================
 test "P2/mcp snapshot equals frozen tools/list and stdout has only frames" {
     // Given: the frozen snapshot and an MCP client over stdio
     // When:  initialize, tools/list and a positive plus malformed call per tool run
-    // Then:  snapshot diff is zero, 9/9 tools, instructions and protocolVersion negotiated,
+    // Then:  snapshot diff is zero, 13/13 tools, instructions and protocolVersion negotiated,
     //        every stdout line is a frame, malformed input yields an observable error
     //        (assertion — to be implemented)
     // And (negative control): dropping a tool or printing a banner fails the assertions
@@ -967,7 +967,7 @@ test -z "$(git -C "$ENGINE_DIR" remote)"                                       #
 | delay injection | เพิ่ม blocking delay | G6 exit ≠ `0` |
 | stale recurring | binary ใหม่ + artifact เก่า | cutover check `BLOCKED` |
 
-**Definition of Done ของ P2:** OQ5 = freeze บนดิสก์; domain/CLI/MCP/hook/sync ผ่าน test บน synthetic fixture; **differential parity 7/7 PASS และ S5 ผ่านบน fresh real clone พร้อม control ที่เห็นแดง**; สัญญา 9 tools/4 formats/20 commands ไม่แตก (snapshot diff = 0); G1–G6 เขียวแบบ synthetic; G7 precursor มี artifact ต่อ harness; recurring gate ผูกกับ SHA; ไม่มี remote/push; artifact ครบ 5 ฟิลด์ใต้ `$WF/parity/P2/`
+**Definition of Done ของ P2:** OQ5 = freeze บนดิสก์; domain/CLI/MCP/hook/sync ผ่าน test บน synthetic fixture; **differential parity 7/7 PASS และ S5 ผ่านบน fresh real clone พร้อม control ที่เห็นแดง**; สัญญา 13 tools/4 formats/20 commands ไม่แตก (snapshot diff = 0); G1–G6 เขียวแบบ synthetic; G7 precursor มี artifact ต่อ harness; recurring gate ผูกกับ SHA; ไม่มี remote/push; artifact ครบ 5 ฟิลด์ใต้ `$WF/parity/P2/`
 
 ---
 
@@ -977,7 +977,7 @@ test -z "$(git -C "$ENGINE_DIR" remote)"                                       #
 
 - [ ] ยืนยัน **OQ5 = freeze 9 MCP tools + additive-only** ก่อน P2.1 และยอมรับว่า breaking ทำให้ `REQ-COMPAT-01` + parity/cutover plan เป็นโมฆะ
 - [ ] ยืนยันว่า P2 ไม่มี cutover, ไม่แตะ data จริงแบบ canonical และไม่ archive Python (อยู่ที่ P3/P4)
-- [ ] ยืนยัน compatibility surface ใน §5 (9 tools · 4 formats · 3 events · 20 commands · exit codes · `--json`) ว่าเป็นสัญญาที่ต้อง freeze
+- [ ] ยืนยัน compatibility surface ใน §5 (13 tools · 4 formats · 3 events · 20 commands · exit codes · `--json`) ว่าเป็นสัญญาที่ต้อง freeze
 - [ ] ยืนยันว่า S5 (`n_pairs = 30`, `recall5 ≥ 0.8667`, `mrr ≥ 0.85`) เป็น P2 exit/P3 entry และ **ห้ามใช้ G1 แทน**
 - [ ] ยืนยันกฎ recurring private gate (ทุก version/config ที่กระทบ retrieval รวมหลัง P4) และการผูก artifact กับ binary sha256
 - [ ] ยืนยันว่า G7 ยังเป็น manual matrix และ `BLOCKED` ต่อ client ไม่ถูกนับเป็น pass

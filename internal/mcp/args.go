@@ -31,6 +31,11 @@ type ShowArgs struct {
 	ID string `json:"id"`
 }
 
+// CiteArgs is memory_cite's arguments: id is required.
+type CiteArgs struct {
+	ID string `json:"id"`
+}
+
 // AddArgs is memory_add's arguments: text is required (the body).
 type AddArgs struct {
 	Text        string   `json:"text"`
@@ -74,4 +79,26 @@ type TraceArgs struct {
 	Query string `json:"query"`
 	Scope string `json:"scope,omitempty"`
 	Limit int    `json:"limit,omitempty"`
+}
+
+// ArchiveArgs is memory_archive's arguments. Threshold is a pointer so an
+// explicit 0 stays distinguishable from an absent one (the baseline applies its
+// 0.15 default only when the argument is missing).
+type ArchiveArgs struct {
+	Threshold *float64 `json:"threshold,omitempty"`
+	DryRun    bool     `json:"dry_run,omitempty"`
+}
+
+// PromoteArgs is memory_promote's arguments.
+type PromoteArgs struct {
+	MinUses int  `json:"min_uses,omitempty"`
+	Force   bool `json:"force,omitempty"`
+	DryRun  bool `json:"dry_run,omitempty"`
+}
+
+// CompactArgs is memory_compact's arguments.
+type CompactArgs struct {
+	Days     int  `json:"days,omitempty"`
+	MinGroup int  `json:"min_group,omitempty"`
+	DryRun   bool `json:"dry_run,omitempty"`
 }

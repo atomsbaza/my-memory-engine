@@ -12,7 +12,7 @@
 #   config.no-creds   the my-memory block and hook strings carry no token/secret
 #   config.no-sync    the hook path never invokes `mem sync` (no network)
 #   mcp.handshake     spawn the CONFIGURED command: initialize + tools/list
-#   mcp.tools         9 frozen tools served (internal/mcp/tools.frozen.json)
+#   mcp.tools         13 frozen tools served (internal/mcp/tools.frozen.json)
 #   mcp.write         tools/call memory_add → isError false, record id returned
 #   mcp.read          tools/call memory_search → the record just written is found
 #   mcp.stdout        every server stdout line parsed as JSON-RPC (no noise)
@@ -31,9 +31,9 @@
 #                               [--python-home DIR] [--guard FILE] [--json]
 #
 #   --expect engine  (default) config must name the engine binary and the engine
-#                    must serve exactly the frozen 9 tools.
+#                    must serve exactly the frozen 13 tools.
 #   --expect python  rollback proof: config must name the Python writer again and
-#                    the Python server must still serve the frozen 9 (superset ok).
+#                    the Python server must still serve the frozen 13 (superset ok).
 #   (no --live)  static/config checks only; nothing is executed or written.
 #   --live       also spawns the MCP server (one synthetic record write into the
 #                repo) and runs the three configured hooks against a disposable

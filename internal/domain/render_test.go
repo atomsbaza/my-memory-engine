@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -45,9 +44,18 @@ func TestRenderContextSectionsAndBudgets(t *testing.T) {
 			t.Errorf("context missing %q", marker)
 		}
 	}
-	if pos(out, "## Rules") > pos(out, "## Project") ||
-		pos(out, "## Project") > pos(out, "## Knowledge") {
+	if pos(out, "## Rules") > pos(out, "## Project") {
 		t.Errorf("section order wrong:\n%s", out)
+	}
+
+	// The fixture's total budget (1200) is spent by rules+project+lessons, so
+	// the knowledge pointer block sees remain < 200 and is skipped entirely —
+	// Python cmd_context's add() drops such a section. With a total budget
+	// that covers every section the block appears, after the others.
+	roomy := renderCtx(t, root, recs, ContextOptions{Scope: "project:Alpha", Budget: 20000})
+	if pos(roomy, "## Rules") > pos(roomy, "## Project") ||
+		pos(roomy, "## Project") > pos(roomy, "## Knowledge") {
+		t.Errorf("section order under a roomy budget wrong:\n%s", roomy)
 	}
 
 	// The fixture rules bodies exceed the fixture rules budget (300) — the
@@ -112,8 +120,10 @@ func TestRenderContextKnowledgeRotation(t *testing.T) {
 	pinClock(t, "2026-11-08T10:00:00")
 	root := t.TempDir()
 	writeTaxonomyOnly(t, root)
-	// 15 knowledge records with ascending last_used: only the 12 oldest
-	// are shown; the newest three wait for the next rotation.
+	// 15 knowledge records with ascending last_used: the 12 oldest are the
+	// rotation set — every one of them is touched (so the set floats to the
+	// tail and the next pass surfaces the rest), while the newest three stay
+	// out of the block and out of touched.
 	for i := 1; i <= 15; i++ {
 		id := fmt.Sprintf("knowledge.k%02d", i)
 		writeRecFile(t, root, "knowledge", id, fmt.Sprintf("pointer %02d", i),
@@ -123,17 +133,36 @@ func TestRenderContextKnowledgeRotation(t *testing.T) {
 			})
 	}
 	recs := nil2Records(t, root)
-	out := renderCtx(t, root, recs, ContextOptions{})
-
-	found := regexp.MustCompile(`\[id: knowledge\.k\d+\]`).FindAllString(out, -1)
-	if len(found) != 12 {
-		t.Fatalf("knowledge section shows %d pointers, want 12:\n%s", len(found), out)
+	out, touched, err := RenderContext(recs, ContextOptions{Root: root})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(out, "[id: knowledge.k15]") || strings.Contains(out, "[id: knowledge.k14]") {
-		t.Errorf("rotation must show the oldest 12 first:\n%s", out)
+
+	var shown []string
+	for _, r := range touched {
+		if r.Layer == "knowledge" {
+			shown = append(shown, r.ID)
+		}
+	}
+	if len(shown) != 12 {
+		t.Fatalf("rotation touches %d knowledge records, want 12: %v", len(shown), shown)
+	}
+	for _, id := range shown {
+		if id == "knowledge.k14" || id == "knowledge.k15" {
+			t.Errorf("rotation must leave the newest records for the next pass, got %s", id)
+		}
 	}
 	if !strings.Contains(out, "[id: knowledge.k01]") {
-		t.Errorf("oldest pointer missing from rotation:\n%s", out)
+		t.Errorf("oldest pointer missing from the rendered block:\n%s", out)
+	}
+	// The rendered block is clipped at the fixture knowledge budget (300) —
+	// the pointer that no longer fits is cut, not silently over budget.
+	section := out[strings.Index(out, "## Knowledge"):]
+	if !strings.Contains(section, "…[truncated]") {
+		t.Errorf("knowledge block must be truncated at its budget:\n%s", section)
+	}
+	if rlen(strings.SplitN(section, "\n\n", 2)[0]) > 300+200 {
+		t.Errorf("knowledge block exceeds its budget:\n%s", section)
 	}
 }
 

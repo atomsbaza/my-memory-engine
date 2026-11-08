@@ -181,7 +181,7 @@ func TestInstructionsShape(t *testing.T) {
 }
 
 // TestToolsListMatchesFrozenSnapshot: tools/list must be the frozen document —
-// same 9 names in registry order, same descriptions, same input schemas.
+// same 13 names in registry order, same descriptions, same input schemas.
 func TestToolsListMatchesFrozenSnapshot(t *testing.T) {
 	cs := newSession(t, fixtureHome(t, false))
 	res, err := cs.ListTools(context.Background(), nil)
@@ -192,7 +192,7 @@ func TestToolsListMatchesFrozenSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("frozen tools: %v", err)
 	}
-	if len(res.Tools) != len(frozen) || len(frozen) != 9 {
+	if len(res.Tools) != len(frozen) || len(frozen) != 13 {
 		names := make([]string, len(res.Tools))
 		for i, tool := range res.Tools {
 			names[i] = tool.Name
@@ -234,15 +234,19 @@ func TestFrozenRequiredAndProperties(t *testing.T) {
 		"memory_context": {nil, []string{"budget", "no_touch", "project", "query", "scope"}},
 		"memory_search":  {[]string{"query"}, []string{"include_inactive", "layer", "limit", "query", "scope", "scores"}},
 		"memory_show":    {[]string{"id"}, []string{"id"}},
+		"memory_cite":    {[]string{"id"}, []string{"id"}},
 		"memory_add": {[]string{"text"}, []string{
 			"confidence", "decay", "evidence", "expires", "force", "half_life",
 			"layer", "scope", "sensitivity", "source", "supersede", "supersedes", "tags", "text", "title",
 		}},
-		"memory_list":   {nil, []string{"layer", "limit", "scope"}},
-		"memory_verify": {nil, nil},
-		"memory_stats":  {nil, nil},
-		"memory_sync":   {nil, []string{"message", "no_push"}},
-		"memory_trace":  {[]string{"query"}, []string{"limit", "query", "scope"}},
+		"memory_list":    {nil, []string{"layer", "limit", "scope"}},
+		"memory_verify":  {nil, nil},
+		"memory_stats":   {nil, nil},
+		"memory_sync":    {nil, []string{"message", "no_push"}},
+		"memory_archive": {nil, []string{"dry_run", "threshold"}},
+		"memory_promote": {nil, []string{"dry_run", "force", "min_uses"}},
+		"memory_compact": {nil, []string{"days", "dry_run", "min_group"}},
+		"memory_trace":   {[]string{"query"}, []string{"limit", "query", "scope"}},
 	}
 	frozen, err := frozenTools()
 	if err != nil {
@@ -288,7 +292,7 @@ func TestFrozenRequiredAndProperties(t *testing.T) {
 	}
 }
 
-// TestToolCallsWired proves every one of the 9 tools reaches the domain layer
+// TestToolCallsWired proves every one of the 13 tools reaches the domain layer
 // and returns the CLI-shaped text (not a stub).
 func TestToolCallsWired(t *testing.T) {
 	root := fixtureHome(t, false)
@@ -338,6 +342,31 @@ func TestToolCallsWired(t *testing.T) {
 		}
 		if !strings.Contains(text, "id: rule.aaaa0001") || !strings.Contains(text, "sensitivity: internal") {
 			t.Errorf("show did not return the record file:\n%s", text)
+		}
+	})
+
+	t.Run("memory_cite", func(t *testing.T) {
+		text, isErr := callTool(t, cs, "memory_cite", map[string]any{"id": "rule.aaaa0001"})
+		if isErr {
+			t.Fatalf("memory_cite returned an error: %s", text)
+		}
+		if strings.TrimSpace(text) != "rule.aaaa0001" {
+			t.Fatalf("cite output = %q, want the full id", text)
+		}
+		data, err := os.ReadFile(filepath.Join(root, "rules", "always-verify-on-disk-rule.aaaa0001.md"))
+		if err != nil {
+			t.Fatalf("read cited record: %v", err)
+		}
+		// uses was absent in the fixture, so the first cite must land on 1.
+		if !strings.Contains(string(data), "uses: 1") {
+			t.Errorf("cite did not bump uses:\n%s", data)
+		}
+		log, err := os.ReadFile(filepath.Join(root, "ops", "recall-log.jsonl"))
+		if err != nil {
+			t.Fatalf("read recall log: %v", err)
+		}
+		if !strings.Contains(string(log), `"type":"cite"`) {
+			t.Errorf("recall log has no cite row:\n%s", log)
 		}
 	})
 
@@ -409,6 +438,45 @@ func TestToolCallsWired(t *testing.T) {
 		}
 	})
 
+	t.Run("memory_archive", func(t *testing.T) {
+		text, isErr := callTool(t, cs, "memory_archive", map[string]any{"dry_run": true})
+		if isErr {
+			t.Fatalf("memory_archive returned an error: %s", text)
+		}
+		// The fixture's 2026-01-01 records are long past their half-life, so the
+		// dry run must list candidates and summarise without moving anything.
+		if !strings.Contains(text, "DRY  lesson.bbbb0001  S=") {
+			t.Errorf("archive dry run did not list the stale lesson:\n%s", text)
+		}
+		if !strings.Contains(text, "candidates (threshold 0.15) — ยังไม่ย้าย") {
+			t.Errorf("archive dry-run summary missing:\n%s", text)
+		}
+		if _, err := os.Stat(filepath.Join(root, "_archive")); !os.IsNotExist(err) {
+			t.Errorf("dry run created _archive/ (err=%v)", err)
+		}
+	})
+
+	t.Run("memory_promote", func(t *testing.T) {
+		text, isErr := callTool(t, cs, "memory_promote", map[string]any{"dry_run": true})
+		if isErr {
+			t.Fatalf("memory_promote returned an error: %s", text)
+		}
+		// No fixture lesson carries uses/successes, so strict mode finds nothing.
+		if !strings.Contains(text, "dry-run: 0 candidates (min-uses 3, strict (successes==uses>0)) — ยังไม่เขียน") {
+			t.Errorf("promote dry-run summary missing:\n%s", text)
+		}
+	})
+
+	t.Run("memory_compact", func(t *testing.T) {
+		text, isErr := callTool(t, cs, "memory_compact", map[string]any{"dry_run": true})
+		if isErr {
+			t.Fatalf("memory_compact returned an error: %s", text)
+		}
+		if !strings.Contains(text, "groups (>= 3 handoffs, older than 7d) — ยังไม่เขียน") {
+			t.Errorf("compact dry-run summary missing:\n%s", text)
+		}
+	})
+
 	t.Run("memory_trace", func(t *testing.T) {
 		text, isErr := callTool(t, cs, "memory_trace", map[string]any{"query": "artifact", "limit": 5})
 		if isErr {
@@ -458,11 +526,11 @@ func TestMalformedInputRejected(t *testing.T) {
 		}
 	}
 
-	// A tool outside the frozen set must not be served.
+	// A tool outside the served set must not be served.
 	if res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
-		Name: "memory_promote", Arguments: map[string]any{},
+		Name: "memory_unknown", Arguments: map[string]any{},
 	}); err == nil && !res.IsError {
-		t.Error("memory_promote (outside the frozen 9) was served, want a protocol error")
+		t.Error("memory_unknown (not in the tool set) was served, want a protocol error")
 	}
 }
 

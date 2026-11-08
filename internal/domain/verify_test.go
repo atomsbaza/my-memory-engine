@@ -105,11 +105,11 @@ func TestVerifyProblems(t *testing.T) {
 func TestVerifyLayerDirMismatch(t *testing.T) {
 	root := copyHome(t)
 	// A lesson record stored in rules/ (schema layer dirs disagree).
-	writeRecFile(t, root, "lesson", "lesson.bbbb000d", "misplaced lesson",
+	rel := writeRecFile(t, root, "lesson", "lesson.bbbb000d", "misplaced lesson",
 		"stored in the wrong folder\n"+provenanceMarker, nil)
 	// writeRecFile places by layer; move the file into rules/ manually.
-	src := filepath.Join(root, "lessons", "misplaced-lesson-lesson.bbbb000d.md")
-	dst := filepath.Join(root, "rules", "misplaced-lesson-lesson.bbbb000d.md")
+	src := filepath.Join(root, filepath.FromSlash(rel))
+	dst := filepath.Join(root, "rules", filepath.Base(rel))
 	if err := os.Rename(src, dst); err != nil {
 		t.Fatal(err)
 	}

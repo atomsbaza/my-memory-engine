@@ -5,7 +5,7 @@
 // Covered here:
 //   - every stdout byte parses as a JSON-RPC frame (no banner, no logging)
 //   - initialize negotiates a protocol version and carries the instructions
-//   - tools/list is the frozen 9-tool document (names, descriptions, schemas)
+//   - tools/list is the frozen 13-tool document (names, descriptions, schemas)
 //   - each frozen tool answers a positive call and rejects malformed input
 package mcp_test
 
@@ -354,7 +354,7 @@ func TestStdioPurity(t *testing.T) {
 	}
 }
 
-// TestToolsListFrozenContract: the served tools/list is the frozen 9-tool
+// TestToolsListFrozenContract: the served tools/list is the frozen 13-tool
 // document — same names, descriptions and input schemas as the baseline.
 func TestToolsListFrozenContract(t *testing.T) {
 	home := fixtureHome(t)
@@ -376,8 +376,8 @@ func TestToolsListFrozenContract(t *testing.T) {
 	if err := json.Unmarshal(memconf.FrozenToolsJSON(), &frozen); err != nil {
 		t.Fatalf("parse embedded frozen snapshot: %v", err)
 	}
-	if len(res.Tools) != 9 {
-		t.Fatalf("tools/list returned %d tools, want 9", len(res.Tools))
+	if len(res.Tools) != 13 {
+		t.Fatalf("tools/list returned %d tools, want 13", len(res.Tools))
 	}
 	if len(frozen) != len(res.Tools) {
 		t.Fatalf("frozen snapshot has %d tools, served %d", len(frozen), len(res.Tools))
@@ -411,6 +411,7 @@ func TestFrozenArgumentContract(t *testing.T) {
 	want := map[string][]string{
 		"memory_search": {"query"},
 		"memory_show":   {"id"},
+		"memory_cite":   {"id"},
 		"memory_add":    {"text"},
 		"memory_trace":  {"query"},
 	}
@@ -424,8 +425,8 @@ func TestFrozenArgumentContract(t *testing.T) {
 	if err := json.Unmarshal(memconf.FrozenToolsJSON(), &frozen); err != nil {
 		t.Fatalf("parse embedded frozen snapshot: %v", err)
 	}
-	if len(frozen) != 9 {
-		t.Fatalf("frozen snapshot has %d tools, want the frozen 9", len(frozen))
+	if len(frozen) != 13 {
+		t.Fatalf("frozen snapshot has %d tools, want 13", len(frozen))
 	}
 	seen := make(map[string]bool, len(frozen))
 	for _, tool := range frozen {
@@ -577,6 +578,8 @@ func TestMalformedInput(t *testing.T) {
 		{"memory_search", map[string]any{"query": "artifact", "limit": "many"}},
 		{"memory_show", map[string]any{}},
 		{"memory_show", map[string]any{"id": ""}},
+		{"memory_cite", map[string]any{}},
+		{"memory_cite", map[string]any{"id": ""}},
 		{"memory_add", map[string]any{}},
 		{"memory_add", map[string]any{"text": ""}},
 		{"memory_trace", map[string]any{}},
@@ -592,13 +595,13 @@ func TestMalformedInput(t *testing.T) {
 		}
 	}
 
-	// A tool outside the frozen set is not served: protocol error or error result.
-	s := runMCP(t, home, append(initialize(), call(2, "memory_promote", nil))...)
+	// A tool outside the served set is not served: protocol error or error result.
+	s := runMCP(t, home, append(initialize(), call(2, "memory_unknown", nil))...)
 	f := s.response(t, 2)
 	if len(f.Error) == 0 || string(f.Error) == "null" {
 		var res toolResult
 		if err := json.Unmarshal(f.Result, &res); err != nil || !res.IsError {
-			t.Errorf("memory_promote was served: error=%s result=%s", f.Error, f.Result)
+			t.Errorf("memory_unknown was served: error=%s result=%s", f.Error, f.Result)
 		}
 	}
 }

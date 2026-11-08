@@ -164,6 +164,7 @@ func cmdImport(e *Env, c command, argv []string) int {
 			fmt.Fprintf(e.Stdout, "  skip %s (secret/path/pii — ต้อง redact ก่อน import: %v)\n", orDash(r.id), gerr)
 			continue
 		}
+		created := today()
 		fm := codec.Frontmatter{
 			"id":          recID,
 			"title":       title,
@@ -173,16 +174,16 @@ func cmdImport(e *Env, c command, argv []string) int {
 			"confidence":  r.conf,
 			"source":      r.src,
 			"evidence":    []string{"import:" + r.src + ":" + orDash(r.id)},
-			"created":     today(),
-			"last_used":   today(),
+			"created":     created,
+			"last_used":   created,
 			"expires":     "none",
 			"status":      "active",
 			"sensitivity": "internal",
 		}
-		rel := "lessons/" + codec.Filename("lesson", title, recID)
+		rel := "lessons/" + codec.Filename("lesson", created, title)
 		target := filepath.Join(root, filepath.FromSlash(rel))
 		if _, statErr := os.Stat(target); statErr == nil {
-			rel = "lessons/" + codec.FilenameN("lesson", title, recID, 2)
+			rel = "lessons/" + codec.FilenameN("lesson", created, title, 2)
 			target = filepath.Join(root, filepath.FromSlash(rel))
 		}
 		if merr := os.MkdirAll(filepath.Dir(target), 0o755); merr != nil {

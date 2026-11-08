@@ -212,13 +212,13 @@ func RenderContext(recs []store.Record, o ContextOptions) (string, []store.Recor
 		for _, r := range know {
 			lines = append(lines, "- "+titleOrID(r)+" — "+clipRunes(collapseSpace(r.Body), 60)+" [id: "+r.ID+"]")
 		}
-		remain := b.total - b.used
-	if remain > 0 {
-		block := "## Knowledge (pointers — ขอเนื้อเต็มด้วย `mem show <id>`)" + "\n_[source: knowledge/*.md]_\n" + strings.Join(lines, "\n")
-		b.parts = append(b.parts, block)
-		b.used += rlen(block)
-	}
-	touched = append(touched, know...)
+		knowledgeCap, ok := b.budgets["knowledge"]
+		if !ok {
+			knowledgeCap = 1200 // Python b.get("knowledge", 1200)
+		}
+		b.add("Knowledge (pointers — ขอเนื้อเต็มด้วย `mem show <id>`)", strings.Join(lines, "\n"),
+			"knowledge/*.md", knowledgeCap)
+		touched = append(touched, know...)
 	}
 
 	if len(b.parts) == 0 {

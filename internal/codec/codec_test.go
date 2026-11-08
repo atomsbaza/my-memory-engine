@@ -18,9 +18,13 @@ func mustParse(t *testing.T, text string) (Frontmatter, string) {
 	return fm, body
 }
 
-// roundtrip asserts Reassemble(ParseFront(src)) == src exactly.
+// roundtrip asserts one rewrite of src reproduces its canonical form.
 // Canonical form: DumpFront(fm) + "\n" + strings.TrimLeft(body, "\n")
-// — mirrors Python mem's rewrite: dump_front(meta) + "\n" + body.lstrip("\n").
+// — mirrors Python mem's Rec.rewrite: dump_front(meta) + "\n" + body.
+// Python's parse_front splits with str.splitlines(), so the body carries no
+// trailing newline and the first rewrite drops the file's final "\n"
+// (verified against `mem cite` on the Python baseline). A second rewrite is
+// therefore byte-stable, which the second assertion pins.
 func roundtrip(t *testing.T, src string) {
 	t.Helper()
 	fm, body, err := ParseFront(src)
@@ -28,8 +32,15 @@ func roundtrip(t *testing.T, src string) {
 		t.Fatalf("ParseFront error: %v", err)
 	}
 	got := DumpFront(fm) + "\n" + strings.TrimLeft(body, "\n")
-	if got != src {
-		t.Errorf("roundtrip mismatch:\n--- want ---\n%s\n--- got ---\n%s", src, got)
+	if want := strings.TrimSuffix(src, "\n"); got != want {
+		t.Errorf("roundtrip mismatch:\n--- want ---\n%q\n--- got ---\n%q", want, got)
+	}
+	fm2, body2, err := ParseFront(got)
+	if err != nil {
+		t.Fatalf("ParseFront(rewrite) error: %v", err)
+	}
+	if again := DumpFront(fm2) + "\n" + strings.TrimLeft(body2, "\n"); again != got {
+		t.Errorf("second rewrite is not byte-stable:\n--- want ---\n%q\n--- got ---\n%q", got, again)
 	}
 }
 
@@ -502,25 +513,44 @@ func TestSlugify_TruncatesAt60Runes(t *testing.T) {
 // Filename / FilenameN
 // ---------------------------------------------------------------------------
 
-func TestFilename_Format(t *testing.T) {
-	name := Filename("lesson", "my title", "lesson.aabbccdd")
-	if !strings.HasSuffix(name, ".md") {
-		t.Errorf("filename must end in .md: %q", name)
-	}
-	if !strings.Contains(name, "lesson.aabbccdd") {
-		t.Errorf("filename must contain id: %q", name)
+// Python cmd_add: lesson/handoff/decision carry the created date in the
+// filename, every other layer uses the bare slug.
+func TestFilename_DatedLayers(t *testing.T) {
+	for _, layer := range []string{"lesson", "handoff", "decision"} {
+		got := Filename(layer, "2026-11-08", "Parity Runner Synthetic Marker")
+		const want = "2026-11-08-parity-runner-synthetic-marker.md"
+		if got != want {
+			t.Errorf("Filename(%s): want %q got %q", layer, want, got)
+		}
 	}
 }
 
-func TestFilename_CollisionSuffix(t *testing.T) {
-	base := FilenameN("lesson", "my title", "lesson.aabbccdd", 0)
-	coll1 := FilenameN("lesson", "my title", "lesson.aabbccdd", 1)
-	coll2 := FilenameN("lesson", "my title", "lesson.aabbccdd", 2)
-	if base == coll1 || coll1 == coll2 {
-		t.Errorf("collision suffixes must differ: %q %q %q", base, coll1, coll2)
+func TestFilename_PlainLayers(t *testing.T) {
+	for _, layer := range []string{"rule", "project", "knowledge"} {
+		got := Filename(layer, "2026-11-08", "Memory Index Sqlite")
+		const want = "memory-index-sqlite.md"
+		if got != want {
+			t.Errorf("Filename(%s): want %q got %q", layer, want, got)
+		}
 	}
-	if !strings.Contains(coll1, "-1.md") {
-		t.Errorf("n=1 must contain -1.md: %q", coll1)
+}
+
+func TestFilename_EmptyTitleFallsBackToEntry(t *testing.T) {
+	if got := Filename("rule", "2026-11-08", "!!!"); got != "entry.md" {
+		t.Errorf("Filename with unusable title = %q, want entry.md", got)
+	}
+}
+
+// Python cmd_add's collision loop: "-2", "-3", … appended to the stem.
+func TestFilenameN_CollisionSuffix(t *testing.T) {
+	if got := FilenameN("lesson", "2026-11-08", "my title", 0); got != "2026-11-08-my-title.md" {
+		t.Errorf("n=0 = %q", got)
+	}
+	if got := FilenameN("lesson", "2026-11-08", "my title", 2); got != "2026-11-08-my-title-2.md" {
+		t.Errorf("n=2 = %q", got)
+	}
+	if got := FilenameN("rule", "2026-11-08", "my title", 3); got != "my-title-3.md" {
+		t.Errorf("n=3 plain layer = %q", got)
 	}
 }
 
@@ -565,5 +595,67 @@ func TestNeedsQuote_PlainOK(t *testing.T) {
 		if needsQuote(s) {
 			t.Errorf("plain string should not need quoting: %q", s)
 		}
+	}
+}
+
+// Python _fmt_scalar renders a float with str(): a whole number keeps its
+// decimal point. Provenance: `python3 -c "print(repr(1.0))"` == "1.0".
+func TestDumpFront_FloatKeepsDecimalPoint(t *testing.T) {
+	cases := []struct {
+		value float64
+		want  string
+	}{
+		{1.0, "decay: 1.0"},
+		{0.5, "decay: 0.5"},
+		{0.9, "decay: 0.9"},
+		{0.30000000000000004, "decay: 0.30000000000000004"},
+	}
+	for _, c := range cases {
+		out := DumpFront(Frontmatter{"decay": c.value})
+		if !strings.Contains(out, c.want) {
+			t.Errorf("DumpFront(decay=%v) = %q, want it to contain %q", c.value, out, c.want)
+		}
+	}
+}
+
+func TestPyFloatRepr(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{1.0, "1.0"},
+		{0.0, "0.0"},
+		{0.8, "0.8"},
+		{0.25, "0.25"},
+		{-1.0, "-1.0"},
+		{1e-05, "1e-05"},
+	}
+	for _, c := range cases {
+		if got := pyFloatRepr(c.in); got != c.want {
+			t.Errorf("pyFloatRepr(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// Python parse_front returns "\n".join(text.splitlines()), so the body never
+// carries the file's trailing newline. Provenance: `mem cite` on the Python
+// baseline rewrites a record and the file no longer ends with "\n".
+func TestParseFront_BodyDropsTrailingNewline(t *testing.T) {
+	src := "---\nid: lesson.aabbccdd\n---\n\nbody line\n"
+	_, body, err := ParseFront(src)
+	if err != nil {
+		t.Fatalf("ParseFront: %v", err)
+	}
+	if want := "\nbody line"; body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+
+	// A blank line at the end of the body survives (splitlines keeps it).
+	_, body, err = ParseFront("---\nid: lesson.aabbccdd\n---\n\nbody\n\n")
+	if err != nil {
+		t.Fatalf("ParseFront: %v", err)
+	}
+	if want := "\nbody\n"; body != want {
+		t.Errorf("body with a trailing blank line = %q, want %q", body, want)
 	}
 }

@@ -6,7 +6,7 @@
 #
 # When the private Python baseline is available ($MEM_PY_BIN, default
 # ~/my-memory/bin/mem) the script also re-extracts its MCP_TOOLS entry for the
-# frozen 9 and diffs it against internal/mcp/tools.frozen.json — that is the
+# frozen 13 and diffs it against internal/mcp/tools.frozen.json — that is the
 # provenance check for the embedded snapshot. The public repo/CI has no baseline,
 # so there the check reports "skipped" instead of failing.
 #
@@ -37,8 +37,9 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 
 FROZEN = [
-    "memory_context", "memory_search", "memory_show", "memory_add",
-    "memory_list", "memory_verify", "memory_stats", "memory_sync",
+    "memory_context", "memory_search", "memory_show", "memory_cite",
+    "memory_add", "memory_list", "memory_verify", "memory_stats",
+    "memory_sync", "memory_archive", "memory_promote", "memory_compact",
     "memory_trace",
 ]
 byname = {t["name"]: t for t in mod.MCP_TOOLS}

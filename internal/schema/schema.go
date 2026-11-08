@@ -8,6 +8,7 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -48,6 +49,7 @@ type Schema struct {
 	AgentCount      int
 
 	Layers         map[string]LayerDef
+	LayerOrder     []string // taxonomy declaration order (Python scan order)
 	Budgets        map[string]int
 	Tags           []string
 	SecretPatterns []string
@@ -76,6 +78,11 @@ var defaultLayers = map[string]LayerDef{
 	"knowledge": {Dir: "knowledge", FileMode: "one-per-topic", ExpiresRequired: false, Inject: "pointer-only"},
 	"ops":       {Dir: "ops", FileMode: "append-only", ExpiresRequired: false, Inject: "never"},
 }
+
+// defaultLayerOrder is the taxonomy order the Python baseline declares — the
+// order its scan walks layers in, so record order (and every stable sort built
+// on it) depends on it.
+var defaultLayerOrder = []string{"rule", "project", "lesson", "decision", "handoff", "knowledge", "ops"}
 
 var defaultBudgets = map[string]int{
 	"rules": 5400, "project": 6000, "lesson": 8000,
@@ -192,6 +199,7 @@ func LoadSchema(root string) (Schema, error) {
 		if len(t.Layers) > 0 {
 			s.Layers = t.Layers
 			s.ValidLayers = stringSet(sortedMapKeys(t.Layers))
+			s.LayerOrder = taxonomyLayerOrder(data, t.Layers)
 		}
 		if len(t.BudgetsChars) > 0 {
 			s.Budgets = t.BudgetsChars
@@ -301,6 +309,7 @@ func buildDefault() Schema {
 	return Schema{
 		SchemaVersion:      SchemaVersion,
 		Layers:             copyLayers(defaultLayers),
+		LayerOrder:         append([]string(nil), defaultLayerOrder...),
 		Budgets:            copyInts(defaultBudgets),
 		Tags:               append([]string(nil), defaultTags...),
 		SecretPatterns:     append([]string(nil), defaultSecretPatterns...),
@@ -325,15 +334,6 @@ func buildDefault() Schema {
 func (s *Schema) ValidateRecord(rec map[string]any) error {
 	_, err := s.ValidateRecordWithWarnings(rec)
 	return err
-}
-
-// Stamp sets schema_version on rec to the supported version unless the record
-// already carries one. Callers stamp before writing; ValidateRecord refuses a
-// record whose existing version is not supported, so Stamp never masks one.
-func (s *Schema) Stamp(rec map[string]any) {
-	if _, exists := rec["schema_version"]; !exists {
-		rec["schema_version"] = s.SchemaVersion
-	}
 }
 
 // ValidateRecordWithWarnings is ValidateRecord plus soft diagnostics: tags
@@ -585,6 +585,77 @@ func sortedMapKeys(m map[string]LayerDef) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// taxonomyLayerOrder returns the layer names in the order taxonomy.json
+// declares them. Go map decoding loses that order, so the raw document is
+// re-tokenized: Python scan walks `ctx.layers.items()` in declaration order
+// and that order is the tie-break of every stable sort downstream. Keys
+// present in the map but absent from the document (impossible for a decoded
+// document, but cheap insurance) are appended alphabetically.
+func taxonomyLayerOrder(data []byte, layers map[string]LayerDef) []string {
+	order, ok := jsonObjectKeyOrder(data, "layers")
+	if !ok {
+		return sortedMapKeys(layers)
+	}
+	seen := make(map[string]bool, len(order))
+	out := make([]string, 0, len(layers))
+	for _, k := range order {
+		if _, known := layers[k]; known && !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	for _, k := range sortedMapKeys(layers) {
+		if !seen[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// jsonObjectKeyOrder scans a JSON document for the object member named field
+// at the top level and returns that object's keys in document order.
+func jsonObjectKeyOrder(data []byte, field string) ([]string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, false
+	}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, _ := keyTok.(string)
+		if key != field {
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return nil, false
+			}
+			continue
+		}
+		if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+			return nil, false
+		}
+		var keys []string
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return nil, false
+			}
+			k, _ := keyTok.(string)
+			keys = append(keys, k)
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return nil, false
+			}
+		}
+		if _, err := dec.Token(); err != nil { // closing brace
+			return nil, false
+		}
+		return keys, true
+	}
+	return nil, false
 }
 
 func sortedBoolKeys(m map[string]bool) []string {

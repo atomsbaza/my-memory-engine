@@ -9,6 +9,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -97,7 +98,7 @@ var kvRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$`)
 // ParseFront splits a document into (Frontmatter, body, error).
 // Returns empty map and original text if no valid front-matter found.
 func ParseFront(text string) (Frontmatter, string, error) {
-	lines := strings.Split(text, "\n")
+	lines := splitLines(text)
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return Frontmatter{}, text, nil
 	}
@@ -157,6 +158,19 @@ func ParseFront(text string) (Frontmatter, string, error) {
 	return meta, body, nil
 }
 
+// splitLines splits text the way Python's str.splitlines() does for the
+// newline-terminated text a record file holds: a single trailing "\n" does not
+// produce a final empty element. The body ParseFront returns is therefore the
+// same string Python's parse_front yields — which is what Rewrite re-emits
+// (Python rewrites keep no trailing newline after the body).
+func splitLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	if len(lines) > 1 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
 // --- dump helpers ---
 
 // needsQuote mirrors Python _needs_quote.
@@ -182,16 +196,35 @@ func needsQuote(v string) bool {
 	return false
 }
 
-// fmtScalar mirrors Python _fmt_scalar.
+// fmtScalar mirrors Python _fmt_scalar. Python renders a scalar with str(),
+// so a float keeps its decimal point ("decay: 1.0", never "decay: 1") —
+// floats therefore go through pyFloatRepr rather than %v.
 func fmtScalar(v any) string {
 	var s string
-	if v == nil {
+	switch tv := v.(type) {
+	case nil:
 		s = ""
-	} else {
+	case float64:
+		s = pyFloatRepr(tv)
+	case float32:
+		s = pyFloatRepr(float64(tv))
+	default:
 		s = fmt.Sprintf("%v", v)
 	}
 	if needsQuote(s) {
 		return `"` + s + `"`
+	}
+	return s
+}
+
+// pyFloatRepr renders a float the way Python's str() does for the values a
+// record front-matter carries (decay and confidence, both within [0,1]):
+// whole numbers keep one decimal place, everything else uses the shortest
+// round-tripping form, e.g. 1.0 -> "1.0", 0.8 -> "0.8", 0.30000000000000004.
+func pyFloatRepr(v float64) string {
+	s := strconv.FormatFloat(v, 'g', -1, 64)
+	if !strings.ContainsAny(s, ".eE") {
+		s += ".0"
 	}
 	return s
 }
@@ -301,21 +334,28 @@ func Slugify(title string) string {
 	return s
 }
 
-// Filename returns the canonical filename for a record: "<slug>-<id>.md".
-// If slug is empty it falls back to "entry".
-// collision suffix logic: the caller must check for existing files; this
-// function only produces the base name. For collision handling see FilenameN.
-func Filename(layer, title, id string) string {
+// datedLayers are the layers whose filename carries the created date
+// (Python cmd_add: `if layer in ("lesson", "handoff", "decision")`).
+var datedLayers = map[string]bool{"lesson": true, "handoff": true, "decision": true}
+
+// Filename returns the canonical filename for a record, mirroring Python
+// cmd_add exactly: "<created>-<slug>.md" for the dated layers (lesson,
+// handoff, decision) and "<slug>.md" for every other layer. The slug falls
+// back to "entry" when the title has no usable characters.
+func Filename(layer, created, title string) string {
 	slug := Slugify(title)
-	return slug + "-" + id + ".md"
+	if datedLayers[layer] {
+		return created + "-" + slug + ".md"
+	}
+	return slug + ".md"
 }
 
-// FilenameN returns a filename with an optional numeric collision suffix.
-// n==0 → same as Filename; n>0 → "<slug>-<id>-<n>.md".
-func FilenameN(layer, title, id string, n int) string {
-	slug := Slugify(title)
+// FilenameN returns Filename with the Python collision suffix: n==0 is the
+// plain name, n>0 appends "-<n>" to the stem ("<name>-2.md").
+func FilenameN(layer, created, title string, n int) string {
+	name := Filename(layer, created, title)
 	if n == 0 {
-		return slug + "-" + id + ".md"
+		return name
 	}
-	return fmt.Sprintf("%s-%s-%d.md", slug, id, n)
+	return strings.TrimSuffix(name, ".md") + "-" + strconv.Itoa(n) + ".md"
 }

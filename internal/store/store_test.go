@@ -227,10 +227,12 @@ func TestScanSkipsUnderscoreAndOps(t *testing.T) {
 	for _, r := range rep.Records {
 		rels = append(rels, r.Rel)
 	}
+	// Records come back in the taxonomy declaration order of their layer
+	// (Python scan walks ctx.layers.items()), then by relative path.
 	want := []string{
-		"knowledge/nested/deep-pointer-knowledge.4433ff00.md",
-		"lessons/simple-fixture-lesson.aabbccdd.md",
 		"rules/pin-branch-per-feature-rule.1122aa33.md",
+		"lessons/simple-fixture-lesson.aabbccdd.md",
+		"knowledge/nested/deep-pointer-knowledge.4433ff00.md",
 	}
 	if fmt.Sprint(rels) != fmt.Sprint(want) {
 		t.Errorf("records = %v\nwant      %v", rels, want)
@@ -613,7 +615,7 @@ func TestWriteRecordNoGit(t *testing.T) {
 		t.Fatalf("record file missing after write: %v", err)
 	}
 	if !strings.HasPrefix(res.Rel, "lessons/") || !strings.HasSuffix(res.Rel, ".md") {
-		t.Errorf("Rel = %q, want lessons/<slug>-<id>.md", res.Rel)
+		t.Errorf("Rel = %q, want lessons/<created>-<slug>.md", res.Rel)
 	}
 	back, err := ReadRecord(res.Path)
 	if err != nil {
@@ -626,8 +628,8 @@ func TestWriteRecordNoGit(t *testing.T) {
 	if back.Front["status"] != "active" || back.Front["sensitivity"] != "internal" {
 		t.Errorf("defaults not stamped: status=%#v sensitivity=%#v", back.Front["status"], back.Front["sensitivity"])
 	}
-	if _, ok := back.Front["schema_version"]; !ok {
-		t.Errorf("schema_version not stamped")
+	if _, ok := back.Front["schema_version"]; ok {
+		t.Errorf("schema_version must not be stamped (Python writes none): %#v", back.Front["schema_version"])
 	}
 
 	// Exactly one runtime-log line per failed commit (NFR-OPS-01).

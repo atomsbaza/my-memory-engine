@@ -186,7 +186,9 @@ func WriteRecordWith(root string, rec Record, o WriteOptions) (WriteResult, erro
 	setDefault(fm, "sensitivity", "internal")
 	setDefault(fm, "created", time.Now().Format("2006-01-02"))
 
-	sch.Stamp(fm)
+	// No schema_version stamp: the Python baseline writes none, and record
+	// validation treats an absent version as "current" (an explicit but
+	// unsupported version is still refused).
 	if err := sch.ValidateRecord(fm); err != nil {
 		return WriteResult{}, fmt.Errorf("store: record refused: %w", err)
 	}
@@ -196,14 +198,6 @@ func WriteRecordWith(root string, rec Record, o WriteOptions) (WriteResult, erro
 		return WriteResult{}, err
 	}
 
-	rel := def.Dir + "/" + codec.Filename(layer, title, id)
-	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return WriteResult{}, fmt.Errorf("store: write %s: %w", rel, err)
-	}
-	if _, err := os.Stat(path); err == nil {
-		return WriteResult{}, fmt.Errorf("store: %s already exists — refusing to overwrite (supersede is a later-phase operation)", rel)
-	}
 	existing, err := Scan(root)
 	if err != nil {
 		return WriteResult{}, err
@@ -212,6 +206,22 @@ func WriteRecordWith(root string, rec Record, o WriteOptions) (WriteResult, erro
 		if r.ID == id {
 			return WriteResult{}, fmt.Errorf("store: id %s already exists at %s — refusing duplicate write", id, r.Rel)
 		}
+	}
+
+	// Python cmd_add picks the name and disambiguates a taken one with a
+	// "-2", "-3", … suffix on the stem (two records may share a title and a
+	// created date under different scopes).
+	rel := def.Dir + "/" + codec.Filename(layer, strField(fm, "created"), title)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	for n := 2; ; n++ {
+		if _, serr := os.Stat(path); os.IsNotExist(serr) {
+			break
+		}
+		rel = def.Dir + "/" + codec.FilenameN(layer, strField(fm, "created"), title, n)
+		path = filepath.Join(root, filepath.FromSlash(rel))
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return WriteResult{}, fmt.Errorf("store: write %s: %w", rel, err)
 	}
 
 	unlock, err := lockRoot(root)

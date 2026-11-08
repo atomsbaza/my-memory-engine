@@ -1,15 +1,16 @@
 # my-memory-engine
 
-Public-ready engine repo สำหรับ **my-memory agent-memory framework** — rewrite engine ของ private data repo `~/my-memory` ให้ไม่ใช่ Python อีกต่อไป
+Engine repo สำหรับ **my-memory agent-memory framework** — rewrite engine ของ private data repo `~/my-memory` จาก Python เป็น **Go** (private repo)
 
-> **สถานะปัจจุบัน: มีแต่ spec ยังไม่มีโค้ด** — repo นี้เก็บ design + plan เท่านั้น ยังไม่มีการ implement, ไม่มี remote, ไม่มีอะไรถูก push
+> **สถานะปัจจุบัน: P0–P3 เสร็จ** — language gate ล็อก Go, engine ใช้งานได้ (CLI 20 commands, MCP 13 tools, hooks 4 formats), cutover claude + omp แล้ว
 
 ## Status
 
 - **Design:** rev 5 — ผ่าน independent architecture gate แล้ว (**0 BLOCKER / 0 MAJOR / 1 NIT** ซึ่งแก้แล้ว)
-- **Implementation plan:** 37 tasks (Task 0 baseline + P0 13 + P1 7 + P2 7 + P3 6 + P4 3) — ทุก task มี command, expected exit code และ gate ที่ปิด
-- **Implementation:** ยังไม่เริ่ม (0 บรรทัดโค้ด) · **no remote** · **nothing pushed**
-- **Language:** ยังไม่ตัดสิน — อยู่ใน P0 language gate
+- **Implementation plan:** 37 tasks (Task 0 baseline + P0 13 + P1 7 + P2 7 + P3 6 + P4 3)
+- **Implementation:** P0 ✅ · P1 ✅ · P2 ✅ · P3 claude+omp ✅ (19/19 live probe PASS) · harness อื่น deferred · **P4 ยังไม่เริ่ม**
+- **Language:** **Go** (P0 language gate sign-off 2026-11-08) · Rust permitted where it shows measurable improvement
+- **S5 gate:** recall5 0.8667 · MRR 0.85 · n_pairs 30 (recurring artifact ผูก binary sha)
 
 ## Read order
 

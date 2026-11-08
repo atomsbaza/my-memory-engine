@@ -140,6 +140,12 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 	}
 	w := o.weights()
 
+	// The lexical vector ranks come from the whole corpus, exactly like
+	// Python vector_ids — it reads the vec/df tables, which no layer, scope,
+	// status or sensitivity filter can narrow. Every filter below therefore
+	// operates on a re-sliced copy, never on allRecs.
+	allRecs := recs
+
 	if len(o.Layers) > 0 {
 		want := map[string]bool{}
 		for _, l := range o.Layers {
@@ -196,7 +202,7 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 		if o.VecIDs != nil {
 			vec50 = o.VecIDs
 		} else {
-			vec50 = vectorIDs(recs, o.Query, selectLimit)
+			vec50 = vectorIDs(allRecs, o.Query, selectLimit)
 		}
 	}
 
@@ -453,7 +459,7 @@ func chunkText(text string, maxChars int) []string {
 					chunks = append(chunks, cur)
 					cur = ""
 				}
-			for i := 0; i < rlen(s); i += maxChars {
+				for i := 0; i < rlen(s); i += maxChars {
 					chunks = append(chunks, sliceRunes(s, i, i+maxChars))
 				}
 				continue

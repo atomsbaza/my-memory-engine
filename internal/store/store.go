@@ -263,7 +263,20 @@ func ScanWithReport(root string) (ScanReport, error) {
 		return ScanReport{}, fmt.Errorf("store: scan %s: %w", root, err)
 	}
 	rep := ScanReport{}
-	for _, layer := range sortedLayerNames(sch.Layers) {
+	// layerPos is the taxonomy declaration order — the order Python scan walks
+	// layers, and therefore the order records are handed to every consumer.
+	layerOrder := sch.LayerOrder
+	if len(layerOrder) == 0 {
+		layerOrder = sortedLayerNames(sch.Layers)
+	}
+	layerPos := make(map[string]int, len(layerOrder))
+	for i, name := range layerOrder {
+		layerPos[name] = i
+	}
+	for _, layer := range layerOrder {
+		if _, known := sch.Layers[layer]; !known {
+			continue
+		}
 		if sch.Layers[layer].FileMode == "append-only" {
 			continue // ops/ log — not a record directory
 		}
@@ -305,7 +318,13 @@ func ScanWithReport(root string) (ScanReport, error) {
 			return ScanReport{}, fmt.Errorf("store: scan %s: %w", root, err)
 		}
 	}
-	sort.SliceStable(rep.Records, func(i, j int) bool { return rep.Records[i].Rel < rep.Records[j].Rel })
+	sort.SliceStable(rep.Records, func(i, j int) bool {
+		li, lj := layerPos[rep.Records[i].Layer], layerPos[rep.Records[j].Layer]
+		if li != lj {
+			return li < lj
+		}
+		return rep.Records[i].Rel < rep.Records[j].Rel
+	})
 	sort.SliceStable(rep.Broken, func(i, j int) bool { return rep.Broken[i].Rel < rep.Broken[j].Rel })
 	return rep, nil
 }

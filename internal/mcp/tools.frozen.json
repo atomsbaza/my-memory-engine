@@ -85,6 +85,21 @@
     }
   },
   {
+    "name": "memory_cite",
+    "description": "นับว่า record ถูกใช้จริง — uses +1 และบันทึก log (สัญญาณสำหรับ eval เรียกเมื่อ record เปลี่ยนการตัดสินใจ)",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
     "name": "memory_add",
     "description": "เขียน record ใหม่ (1 record = 1 fact) · lesson ต้องมี **Rule.**/**NOT.**/**Evidence.** · ระบบกันซ้ำ + กัน secret/absolute path ให้อัตโนมัติ",
     "inputSchema": {
@@ -216,6 +231,68 @@
         },
         "no_push": {
           "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_archive",
+    "description": "ย้าย record ที่ retention score ต่ำกว่า threshold ไป _archive/<layer>/ (status=archived) — ส่ง dry_run=true ก่อนเสมอเพื่อดู candidates",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "threshold": {
+          "type": "number",
+          "default": 0.15,
+          "description": "เกณฑ์ S = decay·2^(−days/half_life)·(1+ln(1+uses))·urgency"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "true = แสดง candidates อย่างเดียว ไม่ย้าย"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_promote",
+    "description": "เลื่อน lesson ที่พิสูจน์แล้วเป็น rule (default strict: successes>0 และ ==uses) — ส่ง dry_run=true ก่อนเสมอ",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "min_uses": {
+          "type": "integer",
+          "default": 3
+        },
+        "force": {
+          "type": "boolean",
+          "description": "true = พิจารณาจาก uses อย่างเดียว"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "true = แสดง candidates อย่างเดียว ไม่เขียน"
+        }
+      }
+    }
+  },
+  {
+    "name": "memory_compact",
+    "description": "รวม handoff เก่าเป็น knowledge เดียวต่อ scope (sleep-time compaction) — ส่ง dry_run=true ก่อนเสมอ",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "default": 7,
+          "description": "handoff ที่เก่ากว่า N วัน"
+        },
+        "min_group": {
+          "type": "integer",
+          "default": 3,
+          "description": "scope ที่มี handoff ตั้งแต่ N ตัวจึงรวบ"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "true = แสดงกลุ่มอย่างเดียว ไม่เขียน"
         }
       }
     }

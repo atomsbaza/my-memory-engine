@@ -127,9 +127,9 @@ P3 ปิดได้เมื่อครบทุกข้อ:
 | Requirement | P3 ต้องส่งมอบอะไร | AC ที่พิสูจน์ |
 |---|---|---|
 | **REQ-CUTOVER-01** | สลับทีละ harness + live probe (`agent:<name>` writes > 0, hook exit `0`, no push); เก็บ backup ที่คืน Python ได้; serial และ owner accept ต่อตัว; probe fail → คืนก่อนแตะตัวอื่น | AC-P3-01 … AC-P3-10 |
-| **REQ-COMPAT-01** | ระหว่างและหลัง cutover สัญญาเดิมไม่เปลี่ยน: MCP 9 tools, hook 4 formats, record format/ids; config ที่คืนได้คือ config เดิม | AC-P3-04, AC-P3-06, AC-P3-08 |
+| **REQ-COMPAT-01** | ระหว่างและหลัง cutover สัญญาเดิมไม่เปลี่ยน: MCP 13 tools, hook 4 formats, record format/ids; config ที่คืนได้คือ config เดิม | AC-P3-04, AC-P3-06, AC-P3-08 |
 | **REQ-HOOK-02** *(operational slice)* | hook ของ harness ที่ cut over แล้วยัง exit `0` และไม่ push ในสภาพจริง | AC-P3-04, AC-P3-10 |
-| **REQ-MCP-01** *(operational slice)* | MCP probe ของ harness ที่ cut over ยังเรียก 9 tools ได้ | AC-P3-04 |
+| **REQ-MCP-01** *(operational slice)* | MCP probe ของ harness ที่ cut over ยังเรียก 13 tools ได้ | AC-P3-04 |
 | **REQ-EVAL-01** *(recurring slice)* | binary ที่ cut over ต้องมี recurring S5 artifact ที่ SHA ตรงกัน | AC-P3-02 |
 | **NFR-NET-01** | ไม่มี network call ใน probe ยกเว้น `sync` ที่ configure ไว้ต่อ home | AC-P3-04 |
 | **NFR-SEC-01** | config ที่เปลี่ยนไม่มี credential/token ถูกเขียนลงไฟล์หรือ log | AC-P3-04 |

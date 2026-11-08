@@ -23,7 +23,7 @@ agent ทุกตัวของผู้ใช้ (6 harness) จำสิ่�
 | Actor | ต้องการอะไร | ข้อจำกัดที่ผูกกับ actor นี้ |
 |---|---|---|
 | **Repo owner / maintainer** (solo) | engine ที่ build/verify ได้ในเครื่อง, ตัดสินภาษาและ license ได้เอง, rollback ได้ราย harness | เวลาเป็น constraint หลัก (K6) · เป็นเจ้าของ OQ1–OQ7 ทุกข้อ · เป็นผู้ sign-off ทุก gate |
-| **Agent harnesses** (claude, codex, gemini, opencode, cursor, hermes — 6 ตัวคือ cutover scope) | MCP 9 tools + hook 4 output formats เดิม โดยไม่ต้องแก้ config ที่ติดตั้งแล้ว | hook ต้อง `exit 0` เสมอและห้าม push (K7) · stdout ต้องสะอาด (gemini ต้องได้ JSON บริสุทธิ์) |
+| **Agent harnesses** (claude, codex, gemini, opencode, cursor, hermes — 6 ตัวคือ cutover scope) | MCP 13 tools + hook 4 output formats เดิม โดยไม่ต้องแก้ config ที่ติดตั้งแล้ว | hook ต้อง `exit 0` เสมอและห้าม push (K7) · stdout ต้องสะอาด (gemini ต้องได้ JSON บริสุทธิ์) |
 | **Outside contributor** | อ่าน/รัน/ทดสอบ engine ได้จาก repo สาธารณะโดยไม่ต้องมีข้อมูลจริง | เห็นได้เฉพาะ code + schema defaults + synthetic fixtures + docs · ห้ามเข้าถึง corpus/prompt log/record จริง |
 | **Owner ในฐานะผู้ใช้ข้อมูล** | local-first เต็มรูปแบบ, sync เป็น opt-in, secrets อยู่ในเครื่อง | default path ห้ามมี network call (K2) |
 
@@ -180,15 +180,15 @@ agent ทุกตัวของผู้ใช้ (6 harness) จำสิ่�
 **Trace:** `design.md` §3.3 step 5 (1/2/3 เดิม) · §6.1 cli row · `plan.md` P2.2
 **Verify:** integration tests จับ exit code ต่อกรณี; `stats --json`/`eval --json` parse ด้วย JSON parser สำเร็จทุกบรรทัด
 
-#### REQ-MCP-01 · MCP contract (9 tools, additive-only, clean stdio)
+#### REQ-MCP-01 · MCP contract (13 tools, additive-only, clean stdio)
 
 **EARS**
-- WHEN an MCP client connects over stdio, THE SYSTEM SHALL serve exactly the 9 frozen tools (`memory_context, memory_search, memory_show, memory_cite, memory_add, memory_list, memory_verify, memory_stats, memory_sync`) with unchanged names and arguments, an `initialize` handshake carrying the existing `instructions` and protocolVersion negotiation, plus `tools/list` and `tools/call`.
+- WHEN an MCP client connects over stdio, THE SYSTEM SHALL serve exactly the 13 frozen tools (`memory_context, memory_search, memory_show, memory_cite, memory_add, memory_list, memory_verify, memory_stats, memory_sync, memory_archive, memory_promote, memory_compact, memory_trace`) with unchanged names and arguments, an `initialize` handshake carrying the existing `instructions` and protocolVersion negotiation, plus `tools/list` and `tools/call`.
 - THE SYSTEM SHALL keep stdout protocol-pure: no banner, warning, or log line outside protocol frames.
 - THE SYSTEM SHALL change tool schemas only additively within this scope.
 
 **Trace:** `design.md` §2.3 K5 · §3.2 · §6.1 mcp row · §8.1 (harness↔mem) · `plan.md` P0.2 (probe), P2.3
-**Verify:** `tools/test-mcp-contract.sh` diff `tools/list` กับ frozen snapshot = 9 tools เท่าเดิม; stdout ทุกบรรทัด parse เป็น protocol frame; 6-client matrix ผ่านตาม G7
+**Verify:** `tools/test-mcp-contract.sh` diff `tools/list` กับ frozen snapshot = 13 tools เท่าเดิม; stdout ทุกบรรทัด parse เป็น protocol frame; 6-client matrix ผ่านตาม G7
 
 ### 5.4 Hooks & installers (3)
 
@@ -308,7 +308,7 @@ agent ทุกตัวของผู้ใช้ (6 harness) จำสิ่�
 #### REQ-COMPAT-01 · Compatibility contract (no versioned break in this scope)
 
 **EARS**
-- THE SYSTEM SHALL keep the record format, record ids, the 9 MCP tool schemas, and the 4 hook output formats backward compatible within this scope (additive-only changes).
+- THE SYSTEM SHALL keep the record format, record ids, the 13 MCP tool schemas, and the 4 hook output formats backward compatible within this scope (additive-only changes).
 - WHEN a breaking change is proposed, THE SYSTEM SHALL require a versioned migration plus a separate design decision; this spec SHALL NOT authorize it.
 
 **Trace:** `design.md` §9.1 · §8.1 (harness↔mem row) · §9.5 · `plan.md` P2.3, P2.4 (OQ5 premise)
@@ -495,7 +495,7 @@ Then it exits 0
 | **OQ2** | Owner + module/package identity | **ก่อน P1 scaffold** (hard gate) และยืนยันซ้ำก่อน P4 | ชื่อ repo = `my-memory-engine` (ตัดสิน 2026-10-19) แต่ **namespace ยังเปิด**: Go module path / npm package name / Rust crate name + owner บน GitHub — เปลี่ยนหลัง scaffold = rewrite หลายไฟล์ |
 | **OQ3** | Cutover appetite: staged ราย harness vs one-shot | ก่อน P3 | ยืนยัน staged (design/plan ใช้ staged) หรือรับความเสี่ยง one-shot แบบชัดแจ้ง |
 | **OQ4** | Platform/packaging matrix | ก่อนล็อก P0 native matrix / release | ระบุ 5 targets + Linux libc variant (glibc/musl) + Windows codesign (ยอมรับ SmartScreen หรือ EV cert) — cross-compile ไม่นับเป็น native pass |
-| **OQ5** | Freeze 9 MCP tools + additive-only หรือ breaking | **ก่อน P2** (phase gate) | ยืนยัน freeze; ถ้าเลือก breaking แผน parity/cutover + REQ-COMPAT-01 ของสเปกนี้เป็นโมฆะ ต้องมี design แยก |
+| **OQ5** | Freeze MCP tools + additive-only หรือ breaking (9 ตอนตัดสิน — วันนี้ 13 แบบ additive) | **ก่อน P2** (phase gate) | ยืนยัน freeze; ถ้าเลือก breaking แผน parity/cutover + REQ-COMPAT-01 ของสเปกนี้เป็นโมฆะ ต้องมี design แยก |
 | **OQ6** | Semantic search ใน MVP? | defer ได้ (ไม่ block) | ยืนยัน "ไม่ทำ" ตาม trigger เดิม หรืออนุมัติ scope วิจัยใหม่ |
 | **OQ7** | ยอมรับ Bun `setCustomSQLite` trade-off ไหม | เปิดเฉพาะถ้า B1–B3 ตกบน macOS | ตอบรับ/ไม่รับ หลังดู B7 evidence; ไม่มีคำตอบ = Bun lock ค้าง (ไม่ใช่ pass) |
 

@@ -458,33 +458,6 @@ func TestValidateRecord_NonNegativeInts(t *testing.T) {
 	}
 }
 
-// --- Stamp: schema_version is stamped and preserved ------------------------
-
-func TestStamp_SetsSchemaVersion(t *testing.T) {
-	s, _ := LoadSchema("")
-	rec := validRecord("lesson")
-	s.Stamp(rec)
-	if got := rec["schema_version"]; got != SchemaVersion {
-		t.Errorf("Stamp set schema_version=%v, want %d", got, SchemaVersion)
-	}
-	if err := s.ValidateRecord(rec); err != nil {
-		t.Errorf("stamped record should validate: %v", err)
-	}
-}
-
-func TestStamp_PreservesUnsupportedVersion(t *testing.T) {
-	s, _ := LoadSchema("")
-	rec := validRecord("lesson")
-	rec["schema_version"] = 42
-	s.Stamp(rec)
-	if got := rec["schema_version"]; got != 42 {
-		t.Errorf("Stamp must not overwrite an existing schema_version, got %v", got)
-	}
-	if err := s.ValidateRecord(rec); err == nil {
-		t.Error("unsupported schema_version must still be refused after Stamp")
-	}
-}
-
 // --- LoadSchema: malformed files are hard errors ----------------------------
 
 func TestLoadSchema_BadTaxonomyJSON(t *testing.T) {

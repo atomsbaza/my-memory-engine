@@ -1,12 +1,12 @@
-// Package mcp implements the MCP stdio server (design §6 "mcp" row): the 9
-// frozen tools (plan OQ5 — additive-only compatibility premise) served over
+// Package mcp implements the MCP stdio server (design §6 "mcp" row): the 13
+// tools (plan OQ5 — additive-only compatibility premise) served over
 // github.com/modelcontextprotocol/go-sdk and wired to the same
 // domain/store/index layer the CLI uses (design §5: every entrypoint calls one
 // domain layer).
 //
 // The tool list, the descriptions and every input schema come from
 // tools.frozen.json — a verbatim copy of the Python baseline's MCP_TOOLS
-// (bin/mem) restricted to the 9 frozen names. Each schema is handed to the SDK
+// (bin/mem), in its order. Each schema is handed to the SDK
 // unconverted, so tools/list emits the frozen document itself; tests/mcp pins
 // the emitted list against that snapshot (P2.3 contract test).
 //
@@ -37,19 +37,22 @@ const (
 	Version    = "1.0.0"
 )
 
-// ToolNames lists the 9 frozen tools (OQ5) in Python mem's MCP_TOOLS order.
-// memory_cite/archive/promote/compact exist in the newer Python baseline but
-// are outside the frozen set and stay out until the compatibility decision
-// says otherwise — additive only.
+// ToolNames lists the 13 tools in Python mem's MCP_TOOLS order. Six harnesses
+// already depend on this surface, so changes are additive only (OQ5): a rename
+// or a newly required field is a breaking change.
 var ToolNames = []string{
 	"memory_context",
 	"memory_search",
 	"memory_show",
+	"memory_cite",
 	"memory_add",
 	"memory_list",
 	"memory_verify",
 	"memory_stats",
 	"memory_sync",
+	"memory_archive",
+	"memory_promote",
+	"memory_compact",
 	"memory_trace",
 }
 
@@ -63,7 +66,7 @@ type Options struct {
 	Agent string
 }
 
-// NewServer builds the my-memory MCP server with the 9 frozen tools
+// NewServer builds the my-memory MCP server with the 13 tools
 // registered. Every handler is wired to the domain layer; the initialize
 // handshake carries the baseline instructions text.
 func NewServer(o Options) (*mcpsdk.Server, error) {
@@ -92,17 +95,21 @@ func NewServer(o Options) (*mcpsdk.Server, error) {
 	mcpsdk.AddTool(s, mustTool("memory_context"), srv.handleContext)
 	mcpsdk.AddTool(s, mustTool("memory_search"), srv.handleSearch)
 	mcpsdk.AddTool(s, mustTool("memory_show"), srv.handleShow)
+	mcpsdk.AddTool(s, mustTool("memory_cite"), srv.handleCite)
 	mcpsdk.AddTool(s, mustTool("memory_add"), srv.handleAdd)
 	mcpsdk.AddTool(s, mustTool("memory_list"), srv.handleList)
 	mcpsdk.AddTool(s, mustTool("memory_verify"), srv.handleVerify)
 	mcpsdk.AddTool(s, mustTool("memory_stats"), srv.handleStats)
 	mcpsdk.AddTool(s, mustTool("memory_sync"), srv.handleSync)
+	mcpsdk.AddTool(s, mustTool("memory_archive"), srv.handleArchive)
+	mcpsdk.AddTool(s, mustTool("memory_promote"), srv.handlePromote)
+	mcpsdk.AddTool(s, mustTool("memory_compact"), srv.handleCompact)
 	mcpsdk.AddTool(s, mustTool("memory_trace"), srv.handleTrace)
 
 	return s, nil
 }
 
-// RunStdio serves the 9 tools on the MCP stdio transport (os.Stdin /
+// RunStdio serves the 13 tools on the MCP stdio transport (os.Stdin /
 // os.Stdout, newline-delimited JSON-RPC — the SDK owns both streams). A home
 // that cannot be resolved fails here, before anything is served, instead of
 // turning every tool call into the same error.
@@ -173,8 +180,8 @@ func memBinPath(root string) string {
 // Frozen tool definitions — tools.frozen.json
 // ---------------------------------------------------------------------------
 
-// frozenToolsJSON is the Python baseline's MCP_TOOLS restricted to the frozen
-// 9 (OQ5), copied verbatim: name, description and inputSchema.
+// frozenToolsJSON is the Python baseline's MCP_TOOLS, all 13 in its order,
+// copied verbatim: name, description and inputSchema.
 //
 //go:embed tools.frozen.json
 var frozenToolsJSON []byte

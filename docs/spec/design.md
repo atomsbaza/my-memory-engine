@@ -51,7 +51,7 @@
 | K2 | ใช้งาน fully local ได้ในที่ทำงาน: default ไม่มี network, remote sync ต้อง explicit, secrets อยู่ในเครื่อง | ผู้ใช้สั่ง · brief |
 | K3 | ภาษาอื่นที่ไม่ใช่ Python | ผู้ใช้สั่ง |
 | K4 | CLI ปัจจุบัน (Python, 2,171 บรรทัด, 18 subcommands [OBS]) ทิ้งได้ — แต่ format + storage + tests + golden corpus คือ acceptance spec ของ rewrite (README:508-509, 604-607 [OBS]) | brief · exploration §6.5 |
-| K5 | MCP tool contract (9 tools ตามโค้ดจริง — T2: doc เดิมเขียน 8 [OBS]) + hook 4 output formats (text/json/hermes/cursor [OBS]) ผูกกับ 6 harness ที่ติดตั้งและพิสูจน์แล้วจริง | exploration §3.5-3.6 · brief F7/verification |
+| K5 | MCP tool contract (13 tools ตามโค้ดจริง — T2: doc เดิมเขียน 8, rev 5 เขียน 9 [OBS]) + hook 4 output formats (text/json/hermes/cursor [OBS]) ผูกกับ 6 harness ที่ติดตั้งและพิสูจน์แล้วจริง | exploration §3.5-3.6 · brief F7/verification |
 | K6 | Solo maintainer: velocity > peak performance; dependency footprint เล็กและ pin ได้ | research C9/C10 |
 | K7 | hook ต้อง `exit 0` เสมอและไม่ push (network ใน hook ทำให้ session ค้าง) | AGENTS.md ของ repo [OBS] |
 | K8 | Record เดิมทั้งหมด (127 lessons + rules/decisions/knowledge/handoffs/projects) ต้อง parse ได้และ id ต้องไม่เปลี่ยน | R2/R5 [OBS] |
@@ -90,7 +90,7 @@ flowchart TB
   subgraph Local["Trust zone 1 — เครื่องผู้ใช้ (default: ไม่มี network call ใด ๆ)"]
     subgraph EP["Entrypoints"]
       CLI["mem CLI<br/>18 subcommands เดิม + init + doctor"]
-      MCPS["MCP server (stdio)<br/>9 tools — schema freeze"]
+      MCPS["MCP server (stdio)<br/>13 tools — schema freeze"]
       HOOK["hook adapter<br/>4 formats: text, json, hermes, cursor"]
       INST["harness installers<br/>mem-hook.sh + install.sh + opencode plugin (JS)"]
     end
@@ -283,7 +283,7 @@ sequenceDiagram
 | **index** | FTS5 `unicode61` + bm25, ไฟล์ `index-go.sqlite` แยกจาก Python + `schema_version` stamp + refuse-on-mismatch (แก้ H1), `reindex` = DROP+CREATE จาก markdown เสมอ, substring fallback เมื่อไม่มี FTS5 | `internal/index/` | **MVP** (full rebuild; incremental = later, trigger เดิม records ≥ 400 หรือ p50 > 150 ms) | S1 (FTS5 runtime) — **gate ก่อนเขียนโค้ดอื่น** + R3 Thai tokenization เทียบ golden corpus จริง (ฝั่ง private — S5, ไม่ใช่ public CI) |
 | **sync** | `SyncTransport` interface (commit/fetch/rebase/push/status) + GitRemoteTransport (git CLI) + observable errors (แก้ H2) + never force | `internal/sync/` | **MVP** (generic git เท่านั้น) | E2E บน **real clone** (lesson: ห้ามใช้ worktree) กับ remote ท้องถิ่น (bare repo) — ไม่แตะ remote จริงของผู้ใช้จนผู้ใช้สั่ง |
 | **cli** | 18 subcommands เดิม + exit codes (1/2/3) + `AddOptions` struct แทน argparse Namespace + **ใหม่: `init` (scaffold memory home ใหม่สำหรับผู้ใช้ OSS) + `doctor` (file↔index↔remote consistency — pattern จาก Basic Memory [E25])** | `internal/cli/`, `cmd/mem/` | **MVP** | ported suite 187 assertions เขียวบน 3 OS (ใน engine CI รันบน synthetic fixture home — ไม่มีข้อมูลจริงใน public CI) |
-| **mcp** | official Go SDK (stdio), 9 tools schema freeze (แก้ T2 ในเอกสาร), handshake `instructions` เดิม, protocolVersion negotiation | `internal/mcp/` | **MVP** (stdio เท่านั้น; HTTP = later) | S2: probe ต่อ harness ทั้ง 6 (connect + tools/list + tools/call add จริง) — harness ไหนไม่ผ่าน = ห้าม cutover harness นั้น |
+| **mcp** | official Go SDK (stdio), 13 tools schema freeze (แก้ T2 ในเอกสาร; OQ5 additive: cite/archive/promote/compact), handshake `instructions` เดิม, protocolVersion negotiation | `internal/mcp/` | **MVP** (stdio เท่านั้น; HTTP = later) | S2: probe ต่อ harness ทั้ง 6 (connect + tools/list + tools/call add จริง) — harness ไหนไม่ผ่าน = ห้าม cutover harness นั้น |
 | **hook** | events session-start/user-prompt/stop, budgets (2500/1400), 4 output formats, payload extraction ต่อ harness, fail-open + runtime log (gitignored — ไม่เงียบ และไม่ใช่ `ops/` ledger ที่ commit) | `internal/hook/` | **MVP** | format snapshot tests ต่อ harness + gemini ต้องเป็น JSON บริสุทธิ์ (K5/lesson: harness output contract ต่างกันต่อ harness) |
 | **harness adapters/installers** | `mem-hook.sh` (เปลี่ยนจาก `python3 $MEM` → binary ใหม่), `install.sh` gated (`--yes`/TTY + `.bak-<ts>` — คงพฤติกรรมเดิม), opencode plugin JS, `agents.json` registry (data-driven — เพิ่ม agent ไม่ต้องแก้โค้ด) | `harness/` (shell/JS — ไม่ใช่ Go) | **MVP** | G7 per-harness probe + install idempotent test ใน HOME sandbox (มีใน suite เดิม) |
 | **eval** | golden corpus runner + **สอง gate แยกกัน (MAJOR-1):** (ก) **private migration parity gate (S5)** — corpus จริง 30 คู่ + `baseline.json` (`recall5≥0.8667`, `mrr≥0.85`) รันในเครื่อง/private data repo (real clone) เท่านั้น ก่อน cutover · (ข) **public engine CI gate (G1)** — synthetic fixtures ที่แต่งใหม่ + **synthetic baseline ที่สร้างจาก fixture ชุดนั้นแยกต่างหาก** = smoke/regression check **ไม่ใช่หลักประกัน parity กับ corpus จริงของผู้ใช้** · **ห้าม corpus จริง, prompt logs, record ส่วนตัว ใน public engine repo/CI/artifacts เด็ดขาด** | `internal/eval/` + `testdata/` (synthetic เท่านั้น) | **MVP** | S5 (private, ก่อน cutover) + G1 (public CI); provenance label ต่อ fixture (lesson: golden vectors + provenance — label เป็น metadata check ไม่ใช่ข้อพิสูจน์เนื้อหา §7 item 3) |
@@ -336,7 +336,7 @@ sequenceDiagram
 | engine ↔ data | binary อ่าน MEM_HOME | engine ไม่ hardcode path ส่วนตัว; data self-describing ผ่าน `schema/` ของตัวเอง |
 | public ↔ private | code + synthetic fixtures เท่านั้น | hygiene gates §7 ก่อน push ครั้งแรก |
 | tool ↔ secrets | ไม่มี — MVP ไม่ถือ credential | git credential helper ของผู้ใช้; gitleaks gate ทั้ง data + engine repo |
-| harness ↔ mem | hook stdout contract (4 formats) + MCP tool schema (9 tools) | freeze + snapshot tests; เปลี่ยน = breaking version |
+| harness ↔ mem | hook stdout contract (4 formats) + MCP tool schema (13 tools) | freeze + snapshot tests; เปลี่ยน = breaking version |
 
 ### 8.2 Release readiness (แยก design vs approval gate)
 
@@ -484,7 +484,7 @@ sequenceDiagram
 | **OQ2** | ชื่อ engine repo + owner (gate: เริ่ม P1 — **user gate ก่อน scaffold**) | ชื่อสั้น สื่อ agent-memory, เช็ค collision บน GitHub + package/module namespace ของภาษาที่ P0 เลือกก่อน (Go module / npm registry — เช่น `mem` ชนง่ายมาก ควรตรวจ) | — | **owner/name กำหนด module path + import ทุกไฟล์ของภาษาที่เลือก (Go: `go.mod` module path · Bun: npm package name) ตั้งแต่วัน scaffold P1 — เปลี่ยนหลัง scaffold = rewrite หลายไฟล์ ต้อง settle ก่อน scaffold เท่านั้น** · ยังไม่สร้าง repo/remote ในรันนี้ |
 | **OQ3** | Cutover appetite: staged ราย harness (P3 ~1 สัปดาห์กระจาย) vs one-shot ทีเดียวทั้ง 6 ตัว (gate: เริ่ม P3) | **Staged ราย harness** — rollback ง่าย, ความเสี่ยงต่อครั้ง = 1 ช่องทาง | One-shot (เร็วกว่าแต่พังพร้อมกันทั้ง 6) | ตอบ research Q1 ฝั่ง staged |
 | **OQ4** | v1 platform/packaging scope (gate: release แรก) | binary 5 targets (macOS arm64/x64, Linux amd64/arm64, Windows amd64) + Homebrew tap; **Windows codesign = deferred** (ยอมรับ SmartScreen warning + เขียน doc); Scoop/Winget/AUR/Nix = เมื่อมี demand | ครบทุก package manager ตั้งแต่วันแรก (เพิ่มภาระ solo ชัดเจน) | ตอบ research Q3 |
-| **OQ5** | MCP tool schema: freeze 9 tools + additive-only ใช่ไหม (gate: เริ่ม P2 — **phase gate ต้องตอบก่อน P2**) | **Freeze** — 6 harness ของผู้ใช้เองพึ่งอยู่; breaking = major version + dual-server window | ประกาศ breaking ไปเลยตอนเปลี่ยน engine (ต้องแก้ config 6 ที่) | ตอบ research Q2 · **NIT-4: แผน parity (byte/schema/harness) + cutover ทั้งแผน (§9.1) ตั้งอยู่บนสมมติฐาน freeze — ถ้าเลือก breaking schema แผนนั้นเป็นโมฆะ ต้องทำ design แยกเรื่อง compatibility/config migration สำหรับ 6 harness ก่อน** |
+| **OQ5** | MCP tool schema: freeze 9 tools + additive-only ใช่ไหม (gate: เริ่ม P2 — **phase gate ต้องตอบก่อน P2**) · ณ วันตัดสิน 9 tools; วันนี้ 13 แบบ additive (cite/archive/promote/compact — §6 mcp row) | **Freeze** — 6 harness ของผู้ใช้เองพึ่งอยู่; breaking = major version + dual-server window | ประกาศ breaking ไปเลยตอนเปลี่ยน engine (ต้องแก้ config 6 ที่) | ตอบ research Q2 · **NIT-4: แผน parity (byte/schema/harness) + cutover ทั้งแผน (§9.1) ตั้งอยู่บนสมมติฐาน freeze — ถ้าเลือก breaking schema แผนนั้นเป็นโมฆะ ต้องทำ design แยกเรื่อง compatibility/config migration สำหรับ 6 harness ก่อน** |
 | **OQ6** | Semantic search ใน MVP? (gate: ไม่ต้องตอบตอนนี้ — defer ได้ปลอดภัย) | **ไม่ — คง eval trigger เดิมของ repo** (paraphrase MRR ≤ 0.40 ขณะที่ authored ≥ 0.70 สองรอบติด หรือ records > ~3,000) | ใส่ MVP (ต้องวิจัยเพิ่มทั้งก้อน) | ตอบ research Q4 |
 | **OQ7** | Bun ใช้ Apple system SQLite บน macOS — ถ้า B1–B3 ตกจนต้องใช้ทางหนี `setCustomSQLite` (pin SQLite เอง) ผู้ใช้ยอมรับไหม? (gate: เปิดเฉพาะถ้า B1–B3 ตกจริงบน macOS — ไม่ block PLAN) | **เป็นคำถามผู้ใช้ — design ตัดสินให้ไม่ได้** (ฝั่ง Bun ยังไม่มี [MEASURED]; รอผล B1–B3/B7) | ยอมรับ `setCustomSQLite` — แลกกับคำสัญญา "single executable file" + signing surface ที่เปลี่ยน [INFERENCE] · หรือไม่ยอมรับ → Bun แพ้ hard gate (§4.1) | เงื่อนไขเดียวกับ B7 (§9.2 ก) และ "หลักฐานที่ทำให้ Bun แพ้" (§4.1/§4.3) |
 
@@ -512,7 +512,7 @@ sequenceDiagram
 1. **ADR: ภาษา engine = Go (conditional บน S1)** — drivers: C1/C5/C6/C9; alternatives: Rust/TS/คง Python; reopen: §11.3
 2. **ADR: storage contract = canonical Git working tree เดียว + generic GitRemoteTransport; provider API = metadata-only adapter (เฟส 2)** — drivers: K1/K2, rate-limit evidence E19/E20 · **context: มติผู้ใช้ resolved 2026-10-17 (§5.1) — ADR ต้องบันทึกว่าเป็น user decision ไม่ใช่การ suy ของ architect**
 3. **ADR: แยก engine repo (public) / data repo (private), ไม่มี shared history** — drivers: H5, K2
-4. **ADR: MCP ผ่าน official Go SDK + freeze 9-tool schema; hook 4 formats คงเดิม** — drivers: K5, E1/E2
+4. **ADR: MCP ผ่าน official Go SDK + freeze tool schema (9 → 13 แบบ additive-only); hook 4 formats คงเดิม** — drivers: K5, E1/E2
 5. **ADR: license = (ตามคำตอบ OQ1)** — record เมื่อผู้ใช้ตัดสินใจ
 
 (ตำแหน่งที่เก็บ: `decisions/` ของ data repo ตาม convention เดิมผ่าน `mem add` — PLAN เป็นผู้กำหนดลำดับ)

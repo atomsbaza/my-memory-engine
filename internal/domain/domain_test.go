@@ -106,7 +106,7 @@ func writeRecFile(t *testing.T, root, layer, id, title, body string, mut func(co
 	if dir == "" {
 		t.Fatalf("unknown layer %s", layer)
 	}
-	rel := dir + "/" + codec.Filename(layer, title, id)
+	rel := dir + "/" + codec.Filename(layer, "2026-01-01", title)
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

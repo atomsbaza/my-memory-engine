@@ -349,6 +349,28 @@ func (s *server) handleShow(_ context.Context, _ *mcpsdk.CallToolRequest, in Sho
 }
 
 // ---------------------------------------------------------------------------
+// memory_cite
+// ---------------------------------------------------------------------------
+
+// handleCite records one real use of a record: uses + 1 plus the recall-log
+// row the eval loop reads. It is the explicit "this changed my decision"
+// signal — opening a record (memory_show) does not bump uses.
+func (s *server) handleCite(_ context.Context, _ *mcpsdk.CallToolRequest, in CiteArgs) (*mcpsdk.CallToolResult, any, error) {
+	if in.ID == "" {
+		return result("", "ต้องส่ง id", true)
+	}
+	full, err := domain.Cite(s.root, in.ID)
+	if err != nil {
+		return result("", err.Error(), true)
+	}
+	s.logEvent(map[string]any{
+		"t": nowStamp(), "type": "cite", "id": full,
+		"agent": s.agentRow(), "session": "-",
+	})
+	return result(full, "", false)
+}
+
+// ---------------------------------------------------------------------------
 // memory_add
 // ---------------------------------------------------------------------------
 
@@ -799,6 +821,115 @@ func reportSync(res sync.Result) string {
 		fmt.Fprintln(&b, "pushed")
 	}
 	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// memory_archive — decay/archival scheduler
+// ---------------------------------------------------------------------------
+
+// defaultArchiveThreshold is the baseline's `mem archive` default: records
+// whose retention score falls below it are archival candidates.
+const defaultArchiveThreshold = 0.15
+
+func (s *server) handleArchive(_ context.Context, _ *mcpsdk.CallToolRequest, in ArchiveArgs) (*mcpsdk.CallToolResult, any, error) {
+	threshold := defaultArchiveThreshold
+	if in.Threshold != nil {
+		threshold = *in.Threshold
+	}
+	res, err := domain.Archive(s.root, domain.ArchiveOptions{Threshold: threshold, DryRun: in.DryRun})
+	// A run that fails after moving some files keeps its progress lines: the
+	// caller sees which records already left the active tree.
+	return result(renderArchive(res), errText(err), err != nil)
+}
+
+// renderArchive reproduces the baseline's `mem archive` stdout.
+func renderArchive(res domain.ArchiveResult) string {
+	var b strings.Builder
+	if res.DryRun {
+		for _, c := range res.Candidates {
+			fmt.Fprintf(&b, "DRY  %s  S=%.3f  [%s/%s] %s\n", c.ID, c.Score, c.Layer, c.Scope, c.Rel)
+		}
+		fmt.Fprintf(&b, "dry-run: %d candidates (threshold %s) — ยังไม่ย้าย\n",
+			len(res.Candidates), pyFloat(res.Threshold))
+		return b.String()
+	}
+	for _, m := range res.Moved {
+		fmt.Fprintf(&b, "archived %s (S=%.3f) -> %s\n", m.ID, m.Score, m.Dest)
+	}
+	fmt.Fprintf(&b, "archive: moved %d/%d candidates (of %d active, threshold %s)\n",
+		len(res.Moved), len(res.Candidates), res.Active, pyFloat(res.Threshold))
+	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// memory_promote — proven lessons become rules
+// ---------------------------------------------------------------------------
+
+func (s *server) handlePromote(_ context.Context, _ *mcpsdk.CallToolRequest, in PromoteArgs) (*mcpsdk.CallToolResult, any, error) {
+	res, err := domain.Promote(s.root, domain.PromoteOptions{
+		MinUses: in.MinUses, Force: in.Force, DryRun: in.DryRun,
+	})
+	return result(renderPromote(res), errText(err), err != nil)
+}
+
+// renderPromote reproduces the baseline's `mem promote` stdout.
+func renderPromote(res domain.PromoteResult) string {
+	var b strings.Builder
+	if res.DryRun {
+		for _, c := range res.Candidates {
+			fmt.Fprintf(&b, "DRY  %s  uses=%d successes=%d  [%s] %s\n",
+				c.ID, c.Uses, c.Successes, c.Scope, c.Rel)
+		}
+		fmt.Fprintf(&b, "dry-run: %d candidates (min-uses %d, %s) — ยังไม่เขียน\n",
+			len(res.Candidates), res.MinUses, res.Mode)
+		return b.String()
+	}
+	for _, p := range res.Promoted {
+		fmt.Fprintf(&b, "promoted %s -> %s (%s)\n", p.From, p.To, p.Rel)
+	}
+	fmt.Fprintf(&b, "promote: %d/%d lessons -> rules (min-uses %d, %s)\n",
+		len(res.Promoted), len(res.Candidates), res.MinUses, res.Mode)
+	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// memory_compact — sleep-time handoff compaction
+// ---------------------------------------------------------------------------
+
+func (s *server) handleCompact(_ context.Context, _ *mcpsdk.CallToolRequest, in CompactArgs) (*mcpsdk.CallToolResult, any, error) {
+	res, err := domain.Compact(s.root, domain.CompactOptions{
+		Days: in.Days, MinGroup: in.MinGroup, DryRun: in.DryRun,
+	})
+	return result(renderCompact(res), errText(err), err != nil)
+}
+
+// renderCompact reproduces the baseline's `mem compact` stdout.
+func renderCompact(res domain.CompactResult) string {
+	var b strings.Builder
+	if res.DryRun {
+		for _, g := range res.Groups {
+			fmt.Fprintf(&b, "DRY  scope=%s: %d handoffs — %s\n", g.Scope, len(g.IDs), strings.Join(g.IDs, ", "))
+		}
+		fmt.Fprintf(&b, "dry-run: %d groups (>= %d handoffs, older than %dd) — ยังไม่เขียน\n",
+			len(res.Groups), res.MinGroup, res.Days)
+		return b.String()
+	}
+	handoffs := 0
+	for _, w := range res.Written {
+		fmt.Fprintf(&b, "compacted %d handoffs (%s) -> %s (%s)\n", len(w.IDs), w.Scope, w.ID, w.Rel)
+		handoffs += len(w.IDs)
+	}
+	fmt.Fprintf(&b, "compact: %d groups / %d handoffs -> knowledge (min-group %d, older than %dd)\n",
+		len(res.Written), handoffs, res.MinGroup, res.Days)
+	return b.String()
+}
+
+// errText renders a domain error for result()'s stderr slot.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // ---------------------------------------------------------------------------
