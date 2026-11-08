@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "my-memory record frontmatter (synthetic test fixture)",
+  "type": "object",
+  "required": ["id", "layer", "scope", "created", "status", "sensitivity"],
+  "properties": {
+    "id":            { "type": "string", "pattern": "^(rule|project|lesson|decision|handoff|knowledge|ops)\\.[0-9a-f]{8,16}$" },
+    "title":         { "type": "string", "minLength": 3 },
+    "layer":         { "enum": ["rule", "project", "lesson", "decision", "handoff", "knowledge", "ops"] },
+    "scope":         { "type": "string", "pattern": "^(global|project:.+|repo:.+/.+|agent:.+)$" },
+    "tags":          { "type": "array", "items": { "type": "string" } },
+    "confidence":    { "type": "number", "minimum": 0, "maximum": 1 },
+    "decay":         { "type": "number", "minimum": 0, "maximum": 1 },
+    "half_life":     { "type": ["string", "number"] },
+    "source":        { "type": "string" },
+    "session":       { "type": "string" },
+    "evidence":      { "type": "array", "items": { "type": "string" } },
+    "supersedes":    { "type": "string" },
+    "superseded_by": { "type": "string" },
+    "promoted_from": { "type": "string" },
+    "promoted_to":   { "type": "string" },
+    "compacted_into": { "type": "string" },
+    "archived_at":   { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "created":       { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "last_used":     { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "uses":          { "type": "integer", "minimum": 0 },
+    "successes":     { "type": "integer", "minimum": 0 },
+    "expires":       { "type": "string" },
+    "status":        { "enum": ["active", "superseded", "archived", "promoted", "compacted"] },
+    "sensitivity":   { "enum": ["public", "internal", "private", "quarantine"] },
+    "schema_version": { "type": "integer" }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "layers": {
+    "rule":      { "dir": "rules",     "file_mode": "one-per-topic",  "expires_required": false, "inject": "always" },
+    "project":   { "dir": "projects",  "file_mode": "one-per-entity", "expires_required": false, "inject": "scope-match" },
+    "lesson":    { "dir": "lessons",   "file_mode": "one-per-fact",   "expires_required": false, "inject": "relevance" },
+    "decision":  { "dir": "decisions", "file_mode": "one-per-fact",   "expires_required": false, "inject": "scope-match" },
+    "handoff":   { "dir": "handoffs",  "file_mode": "one-per-fact",   "expires_required": true,  "inject": "relevance+not-expired" },
+    "knowledge": { "dir": "knowledge", "file_mode": "one-per-topic",  "expires_required": false, "inject": "pointer-only" },
+    "ops":       { "dir": "ops",       "file_mode": "append-only",    "expires_required": false, "inject": "never" }
+  },
+  "budgets_chars": {
+    "rules": 5400, "project": 6000, "lesson": 8000,
+    "handoff": 4000, "decision": 3000, "knowledge": 1200, "total": 20000
+  },
+  "scoring": { "w_conf": 1.0, "w_recency": 0.0, "tau_days": 14, "w_uses": 0.0, "threshold_hook": 6.0 },
+  "tags": ["git", "test", "memory"],
+  "secret_patterns": [
+    "(?i)\\b(api[_-]?key|secret|password|passwd|token|bearer)\\b\\s*[:=]\\s*[\"']?[A-Za-z0-9_\\-]{16,}"
+  ],
+  "forbidden_path_fragments": ["/Users/", "/home/"]
+}
