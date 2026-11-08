@@ -99,6 +99,9 @@ type AddOptions struct {
 	Expires     string // none | YYYY-MM-DD | +21d | +2w | +3m
 	Sensitivity string // default "internal"
 	Force       bool
+	// NoCommit writes the record without the local git commit (the CLI's
+	// `mem add --no-commit`). The record still lands on disk.
+	NoCommit bool
 }
 
 func (o AddOptions) withDefaults() AddOptions {
@@ -337,7 +340,7 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 		fm["supersedes"] = target.ID
 	}
 
-	wr, werr := store.WriteRecord(root, store.Record{Front: fm, Body: body})
+	wr, werr := store.WriteRecordWith(root, store.Record{Front: fm, Body: body}, store.WriteOptions{NoCommit: opts.NoCommit})
 	if werr != nil {
 		return AddResult{}, werr
 	}

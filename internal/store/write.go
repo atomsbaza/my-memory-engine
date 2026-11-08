@@ -109,6 +109,21 @@ type WriteResult struct {
 // The append-only layer (ops/) cannot be written through this path — it is a
 // plain append log, mirroring Python mem add.
 func WriteRecord(root string, rec Record) (WriteResult, error) {
+	return WriteRecordWith(root, rec, WriteOptions{})
+}
+
+// WriteOptions carries the write-path switches that must not change the
+// persisted record bytes.
+type WriteOptions struct {
+	// NoCommit skips the local git commit after the atomic write (the CLI's
+	// `mem add --no-commit`). The record is still persisted; Committed stays
+	// false with an empty CommitReason, so callers can tell "skipped" apart
+	// from "attempted and failed".
+	NoCommit bool
+}
+
+// WriteRecordWith is WriteRecord with explicit write options.
+func WriteRecordWith(root string, rec Record, o WriteOptions) (WriteResult, error) {
 	sch, err := schema.LoadSchema(root)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("store: write %s: %w", root, err)
@@ -210,6 +225,9 @@ func WriteRecord(root string, rec Record) (WriteResult, error) {
 	}
 
 	res := WriteResult{Path: path, Rel: rel}
+	if o.NoCommit {
+		return res, nil
+	}
 	if cerr := commitFile(root, rel, layer, scope, title); cerr != nil {
 		res.CommitReason = cerr.Error()
 		if lerr := appendRuntimeLog(root, rel, cerr); lerr != nil {

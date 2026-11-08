@@ -211,6 +211,12 @@ func expandHome(p string) (string, error) {
 	return abs, nil
 }
 
+// ExpandPath is the exported form of the home override rule: a leading ~ is
+// expanded, then the path is made absolute and symlink-resolved. It lets
+// `mem --home PATH` resolve exactly like FindRoot's $MEM_HOME branch instead of
+// growing a second, subtly different path rule in the CLI.
+func ExpandPath(p string) (string, error) { return expandHome(p) }
+
 func isMemoryRepo(dir string) bool {
 	info, err := os.Stat(filepath.Join(dir, "schema", "taxonomy.json"))
 	return err == nil && !info.IsDir()

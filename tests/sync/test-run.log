@@ -1,0 +1,33 @@
+# mem P2.2 local sync gate
+# date: 2026-11-08T10:38:41Z
+# sha:  f7dcd10
+# git:  git version 2.54.0 (Apple Git-157)
+=== RUN   TestIsRepo
+--- PASS: TestIsRepo (0.06s)
+=== RUN   TestCommitAllCountsAndSkips
+--- PASS: TestCommitAllCountsAndSkips (0.14s)
+=== RUN   TestRunWithoutUpstreamSkipsNetwork
+--- PASS: TestRunWithoutUpstreamSkipsNetwork (0.44s)
+=== RUN   TestRunNoPushStopsAfterCommit
+--- PASS: TestRunNoPushStopsAfterCommit (0.14s)
+=== RUN   TestRunConflictStopsBeforePush
+--- PASS: TestRunConflictStopsBeforePush (0.16s)
+=== RUN   TestRunGitFailureIsObservable
+--- PASS: TestRunGitFailureIsObservable (0.17s)
+=== RUN   TestRunRejectsForceArguments
+--- PASS: TestRunRejectsForceArguments (0.04s)
+=== RUN   TestRemotesAndUpstream
+--- PASS: TestRemotesAndUpstream (0.09s)
+PASS
+ok  	github.com/atomsbaza/my-memory-engine/internal/sync	1.567s
+=== RUN   TestLocalSyncEndToEnd
+--- PASS: TestLocalSyncEndToEnd (0.69s)
+=== RUN   TestLocalSyncAutostashKeepsDirtyWork
+--- PASS: TestLocalSyncAutostashKeepsDirtyWork (0.79s)
+=== RUN   TestLocalSyncConflictNamesFileAndDoesNotPush
+--- PASS: TestLocalSyncConflictNamesFileAndDoesNotPush (0.69s)
+=== RUN   TestLocalSyncWithoutRemoteStaysOffline
+--- PASS: TestLocalSyncWithoutRemoteStaysOffline (0.10s)
+PASS
+ok  	github.com/atomsbaza/my-memory-engine/tests/sync	2.382s
+exit=0

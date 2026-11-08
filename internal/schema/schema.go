@@ -290,6 +290,12 @@ func deriveIDPattern(layers map[string]bool) *regexp.Regexp {
 	return regexp.MustCompile(`^(` + strings.Join(names, "|") + `)\.[0-9a-f]{8,16}$`)
 }
 
+// Defaults returns the engine's portable schema with no data repo instance
+// read. `mem init` uses it to scaffold schema/taxonomy.json from the same
+// numbers the loader falls back to, so a fresh home and a schema-less home can
+// never drift apart.
+func Defaults() Schema { return buildDefault() }
+
 // buildDefault returns a Schema populated with portable defaults.
 func buildDefault() Schema {
 	return Schema{

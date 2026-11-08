@@ -116,14 +116,24 @@ func TestEvalRegressionFailsGate(t *testing.T) {
 
 	// Degrade one lesson so its query no longer matches: recall drops to
 	// 2/3 ≈ 0.6667 — more than 0.05 under the 1.0 baseline.
+	//
+	// The control has to remove the title overlap too. score() gives layer 3.0
+	// plus 4.0 per title token, and the fixture title shares "go" with the
+	// query, so a body-only rewrite still lands at 7.9 — above the 6.0 hook
+	// threshold. Changing the title as well is what actually removes the
+	// record from retrieval, which is the regression this test must detect.
 	path := filepath.Join(root, "lessons", "go-concurrency-lesson.face0001.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewritten := strings.ReplaceAll(string(data),
+	rewritten := strings.ReplaceAll(string(data), "title: go concurrency cancellation", "title: unrelated placeholder entry")
+	rewritten = strings.ReplaceAll(rewritten,
 		"Use context cancellation to stop goroutine fan-out; always check ctx.Err before writing results.",
 		"Placeholder text with completely unrelated vocabulary inside.")
+	rewritten = strings.ReplaceAll(rewritten,
+		"**NOT.** ห้ามปล่อย goroutine ค้างโดยไม่มี path ออก",
+		"**NOT.** placeholder anti-pattern.")
 	if rewritten == string(data) {
 		t.Fatal("control rewrite did not change the fixture")
 	}
