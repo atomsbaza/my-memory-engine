@@ -34,6 +34,9 @@ type ContextOptions struct {
 	Budgets map[string]int
 	Scoring *schema.Scoring
 	FTS     func(query string, limit int) ([]string, error)
+	// Indexed reports that the derived index exists; the vector ranks the
+	// baseline reads from that index therefore exist too.
+	Indexed bool
 }
 
 func (o ContextOptions) budgets() map[string]int {
@@ -168,6 +171,7 @@ func RenderContext(recs []store.Record, o ContextOptions) (string, []store.Recor
 			Limit:   12,
 			Scoring: o.Scoring,
 			FTS:     o.FTS,
+			Indexed: o.Indexed,
 		})
 		if err != nil {
 			return "", nil, err

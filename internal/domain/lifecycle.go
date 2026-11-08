@@ -147,7 +147,9 @@ func Review(root, id string, evidence []string) error {
 
 // Touch bumps last_used to today for every record whose last_used differs
 // (the cmd_context rotation side effect and cmd_touch over a record set).
-// It returns how many records were rewritten.
+// It returns how many records were rewritten. Like the baseline it is a pure
+// front-matter write: the derived index is not rebuilt here, so a touch never
+// changes which retrieval ranks exist.
 func Touch(root string, recs []store.Record) (int, error) {
 	n := 0
 	for _, r := range recs {
@@ -160,11 +162,6 @@ func Touch(root string, recs []store.Record) (int, error) {
 			return n, fmt.Errorf("domain: touch %s: %w", r.ID, rerr)
 		}
 		n++
-	}
-	if n > 0 {
-		if rerr := ReindexRoot(root); rerr != nil {
-			return n, fmt.Errorf("domain: touch persisted but reindex failed: %w", rerr)
-		}
 	}
 	return n, nil
 }

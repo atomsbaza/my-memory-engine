@@ -229,6 +229,7 @@ func (s *server) contextText(scope, query string, budget int) (string, []store.R
 		Budget:  budget,
 		Scoring: &scoring,
 		FTS:     fts,
+		Indexed: fts != nil,
 	})
 }
 
@@ -278,6 +279,7 @@ func (s *server) handleSearch(_ context.Context, _ *mcpsdk.CallToolRequest, in S
 		IncludeQuarantine: in.IncludeInactive,
 		Scoring:           &scoring,
 		FTS:               fts,
+		Indexed:           fts != nil,
 		Breakdown:         bd,
 	})
 	if err != nil {
@@ -619,11 +621,20 @@ func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ Sta
 		p.DecayBuckets[b.Label] = 0
 	}
 	today := timeToday()
+	// First-seen order per count map: Python keeps dict insertion order and
+	// sorts stably by count, so equal counts stay in scan order.
+	var layerOrder, sourceOrder []string
 	for _, r := range recs {
+		if _, seen := p.ByLayer[r.Layer]; !seen {
+			layerOrder = append(layerOrder, r.Layer)
+		}
 		p.ByLayer[r.Layer]++
 		src := stringField(r.Front, "source")
 		if src == "" {
 			src = "?"
+		}
+		if _, seen := p.BySource[src]; !seen {
+			sourceOrder = append(sourceOrder, src)
 		}
 		p.BySource[src]++
 		if created := createdOf(r); created > p.NewestBySource[src] {
@@ -684,8 +695,8 @@ func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ Sta
 	var b strings.Builder
 	fmt.Fprintf(&b, "records %d · active %d · superseded %d · archived %d · แตะวันนี้ %d\n",
 		p.Records, p.Active, p.Superseded, p.Archived, p.TouchedToday)
-	fmt.Fprintf(&b, "by layer:   %s\n", sortedCounts(p.ByLayer))
-	fmt.Fprintf(&b, "by source:  %s\n", sortedCounts(p.BySource))
+	fmt.Fprintf(&b, "by layer:   %s\n", countsInOrder(p.ByLayer, layerOrder))
+	fmt.Fprintf(&b, "by source:  %s\n", countsInOrder(p.BySource, sourceOrder))
 	decay := make([]string, 0, len(decayBuckets))
 	for _, bk := range decayBuckets {
 		if p.DecayBuckets[bk.Label] > 0 {
@@ -712,22 +723,20 @@ func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ Sta
 	return result(b.String(), "", false)
 }
 
-// sortedCounts renders "tag count · tag count", highest count first then name.
-func sortedCounts(m map[string]int) string {
+// countsInOrder renders "name count · name count" with the baseline's
+// ordering: count descending, ties in first-seen order. Python's counts live in
+// a dict (insertion ordered) and sorted() is stable, so equal counts follow the
+// scan order instead of re-sorting by name.
+func countsInOrder(m map[string]int, order []string) string {
 	type kv struct {
 		K string
 		V int
 	}
 	pairs := make([]kv, 0, len(m))
-	for k, v := range m {
-		pairs = append(pairs, kv{k, v})
+	for _, k := range order {
+		pairs = append(pairs, kv{k, m[k]})
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i].V != pairs[j].V {
-			return pairs[i].V > pairs[j].V
-		}
-		return pairs[i].K < pairs[j].K
-	})
+	sort.SliceStable(pairs, func(i, j int) bool { return pairs[i].V > pairs[j].V })
 	parts := make([]string, 0, len(pairs))
 	for _, p := range pairs {
 		parts = append(parts, fmt.Sprintf("%s %d", p.K, p.V))
@@ -967,6 +976,7 @@ func (s *server) handleTrace(_ context.Context, _ *mcpsdk.CallToolRequest, in Tr
 		Limit:     limit,
 		Scoring:   &scoring,
 		FTS:       fts,
+		Indexed:   fts != nil,
 		Breakdown: bd,
 	})
 	if err != nil {

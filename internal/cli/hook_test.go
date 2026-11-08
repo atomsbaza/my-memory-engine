@@ -213,6 +213,12 @@ sensitivity: internal
 	if strings.Contains(log, "push") {
 		t.Fatalf("stop hook commit message mentions push: %s", log)
 	}
+	// The baseline's second -m carries the changed paths: the commit body must
+	// name what was committed, not just the layer summary.
+	body := git(t, home, "log", "--format=%b", "-1")
+	if !strings.Contains(body, "lessons/hook-stop-lesson.eeee0001.md") {
+		t.Fatalf("stop hook commit body does not list the changed path: %q", body)
+	}
 }
 
 // TestHookFailOpen: a broken home or repo never makes a hook fail the turn.

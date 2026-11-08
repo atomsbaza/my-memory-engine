@@ -94,6 +94,7 @@ func (e *Env) contextText(root string, o contextRequest) (string, []store.Record
 		Budget:  o.Budget,
 		Scoring: &scoring,
 		FTS:     fts,
+		Indexed: fts != nil,
 	})
 	if err != nil {
 		return "", nil, err

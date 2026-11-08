@@ -162,6 +162,7 @@ func (h hookEngine) Recall(call hook.Call) (string, error) {
 		Limit:     5,
 		Scoring:   &scoring,
 		FTS:       fts,
+		Indexed:   fts != nil,
 	})
 	if err != nil {
 		return "", err
@@ -225,7 +226,7 @@ func (h hookEngine) Stop(call hook.Call) error {
 	message := call.Message
 	if message == "" {
 		if paths, derr := sync.Dirty(root, sync.Options{}); derr == nil && len(paths) > 0 {
-			message = stopCommitMessage(paths)
+			message = stopCommitMessage(paths) + stopCommitBody(paths)
 		}
 	}
 	n, cerr := sync.CommitAll(root, message, sync.Options{})
@@ -284,6 +285,24 @@ func stopCommitMessage(paths []string) string {
 	}
 	msg := fmt.Sprintf("mem: hook stop (%s) — %s", agentEnv(), strings.Join(parts, ", "))
 	return truncateRunes(msg, 110)
+}
+
+// stopCommitBody is the commit body the baseline writes under the subject:
+// the changed paths, first 30 then a "…+N more" tail. It is prefixed with the
+// blank line that makes git commit treat the summary as the subject.
+func stopCommitBody(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	shown := paths
+	if len(shown) > 30 {
+		shown = shown[:30]
+	}
+	body := strings.Join(shown, "\n")
+	if len(paths) > 30 {
+		body += fmt.Sprintf("\n…+%d more", len(paths)-30)
+	}
+	return "\n\n" + body
 }
 
 func pickedRecords(picked []domain.ScoredRecord) []store.Record {

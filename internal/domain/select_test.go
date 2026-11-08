@@ -5,6 +5,7 @@ package domain
 
 import (
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -200,9 +201,19 @@ func TestSelectRRFReorders(t *testing.T) {
 		t.Fatalf("score-only order = %v, want lesson.r1 first", scoreOnly)
 	}
 
-	// Plain selection fuses the lexical vector ranks (Python behaviour even
-	// with no FTS index): r2 = 1.2/61 + 6/62 > r1 = 6/61.
-	fused := SelectFrom2(t, []store.Record{strong, lexical}, SelectOptions{Query: "zebra", Limit: 10})
+	// Without a derived index the baseline has no vector rank list either
+	// (vector_ids reads the index's vec table), so the scored order decides
+	// alone — exactly the score-only control above.
+	noIndex := SelectFrom2(t, []store.Record{strong, lexical},
+		SelectOptions{Query: "zebra", Limit: 10})
+	if len(noIndex) != 2 || noIndex[0] != "lesson.r1" {
+		t.Fatalf("no-index order = %v, want lesson.r1 first", noIndex)
+	}
+
+	// With the index present, plain selection fuses the lexical vector ranks:
+	// r2 = 1.2/61 + 6/62 > r1 = 6/61.
+	fused := SelectFrom2(t, []store.Record{strong, lexical},
+		SelectOptions{Query: "zebra", Limit: 10, Indexed: true})
 	if fused[0] != "lesson.r2" {
 		t.Fatalf("vec fusion order = %v, want lesson.r2 first", fused)
 	}
@@ -210,7 +221,7 @@ func TestSelectRRFReorders(t *testing.T) {
 	// With the FTS rank naming only the lexical record the margin grows:
 	// r2 = 1/61 + 1.2/61 + 6/62.
 	ids := SelectFrom2(t, []store.Record{strong, lexical},
-		SelectOptions{Query: "zebra", Limit: 10, FTSIDs: []string{"lesson.r2"}})
+		SelectOptions{Query: "zebra", Limit: 10, FTSIDs: []string{"lesson.r2"}, Indexed: true})
 	if ids[0] != "lesson.r2" {
 		t.Fatalf("rrf order = %v, want lesson.r2 first", ids)
 	}
@@ -264,6 +275,56 @@ func TestPickForQueryGateAndExpiry(t *testing.T) {
 	lim, err := PickForQuery(recs, RetrievalOptions{Query: "go", Limit: 1})
 	if err != nil || len(lim) != 1 {
 		t.Fatalf("limit 1: %d records, err %v", len(lim), err)
+	}
+}
+
+// The hook recall path fuses exactly the rank lists the baseline can build.
+// Python's vector_ids reads the derived index's vec table, so a home that never
+// ran a reindex has no vector ranks at all: the per-layer candidate window is
+// the top five scores, with no vector entry able to displace them. (P2 hook
+// parity: the engine fused on-the-fly vector ranks in that state and surfaced
+// records the baseline never retrieved.)
+func TestPickForQueryWithoutIndexKeepsScoreOrder(t *testing.T) {
+	pinClock(t, "2026-11-08T10:00:00")
+	// Five title hits ranked by confidence, all with bodies the query cannot
+	// match — so only the score list ranks them.
+	recs := make([]store.Record, 0, 6)
+	for i, conf := range []string{"1.0", "0.9", "0.8", "0.7", "0.6"} {
+		c := conf
+		recs = append(recs, mrec("lesson.s"+strconv.Itoa(i+1), "lesson", "zebra title",
+			"plain unrelated body", "global", func(fm codec.Frontmatter) {
+				fm["confidence"] = c
+			}))
+	}
+	// Below every title hit, but its body carries the query token, so it is
+	// the vector rank's first (and only) entry.
+	lexical := mrec("lesson.v1", "lesson", "other title", "zebra appears in body only", "global", nil)
+	recs = append(recs, lexical)
+
+	ids := func(picked []ScoredRecord) []string {
+		out := make([]string, 0, len(picked))
+		for _, p := range picked {
+			out = append(out, p.Rec.ID)
+		}
+		return out
+	}
+
+	noIndex, err := PickForQuery(recs, RetrievalOptions{Query: "zebra", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ids(noIndex)
+	if containsID(got, "lesson.v1") || !containsID(got, "lesson.s5") {
+		t.Fatalf("no-index pick = %v, want the five score hits (no vector entry)", got)
+	}
+
+	indexed, err := PickForQuery(recs, RetrievalOptions{Query: "zebra", Limit: 5, Indexed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = ids(indexed)
+	if !containsID(got, "lesson.v1") || containsID(got, "lesson.s5") {
+		t.Fatalf("indexed pick = %v, want lesson.v1 to displace the fifth score hit", got)
 	}
 }
 

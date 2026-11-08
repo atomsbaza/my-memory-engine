@@ -254,6 +254,7 @@ func Run(root string, o Options) (Result, error) {
 
 		picked, perr := domain.PickForQuery(recs, domain.RetrievalOptions{
 			Query: p.Query, Threshold: thr, Limit: 5, Scoring: &sc, FTS: fts,
+			Indexed: fts != nil,
 		})
 		if perr != nil {
 			return Result{}, perr
@@ -291,6 +292,7 @@ func Run(root string, o Options) (Result, error) {
 		}
 		picked, perr := domain.PickForQuery(recs, domain.RetrievalOptions{
 			Query: p.Query, Threshold: 5.0, Limit: 5, Scoring: &sc, FTS: fts,
+			Indexed: fts != nil,
 		})
 		if perr != nil {
 			return Result{}, perr

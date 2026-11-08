@@ -48,6 +48,13 @@ type SelectOptions struct {
 	FTSIDs []string
 	VecIDs []string
 
+	// Indexed reports that the derived index exists, so the lexical vector
+	// rank list can be built. Python's vector_ids reads the index's vec/df
+	// tables, so those ranks exist only when the index does: on a home that
+	// never ran a reindex the baseline fuses FTS-less, vector-less and
+	// score-only, and this flag keeps the engine on that same path.
+	Indexed bool
+
 	// Breakdown, when non-nil, receives the RRF fusion internals of this call
 	// (Python select(..., breakdown=info)) so debug surfaces (memory_trace,
 	// search --scores) print the very numbers the ranking used. It is filled
@@ -201,7 +208,7 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 		}
 		if o.VecIDs != nil {
 			vec50 = o.VecIDs
-		} else {
+		} else if o.Indexed {
 			vec50 = vectorIDs(allRecs, o.Query, selectLimit)
 		}
 	}
@@ -514,6 +521,10 @@ type RetrievalOptions struct {
 	Limit     int
 	Scoring   *schema.Scoring
 	FTS       func(query string, limit int) ([]string, error)
+	// Indexed reports that the derived index exists. Python pick_for_query
+	// reads fts_ids and vector_ids from that index, so without it there are
+	// neither FTS nor vector ranks — only the score list feeds the fusion.
+	Indexed bool
 }
 
 // PickForQuery selects across the lesson/decision/handoff layers, skipping
@@ -540,7 +551,7 @@ func PickForQuery(recs []store.Record, o RetrievalOptions) ([]ScoredRecord, erro
 		}
 	}
 	var vec50 []string
-	if len(qTokens) > 0 {
+	if len(qTokens) > 0 && o.Indexed {
 		vec50 = vectorIDs(recs, o.Query, selectLimit)
 	}
 
@@ -554,6 +565,7 @@ func PickForQuery(recs []store.Record, o RetrievalOptions) ([]ScoredRecord, erro
 			Scoring: &w,
 			FTSIDs:  fts50,
 			VecIDs:  vec50,
+			Indexed: o.Indexed,
 		})
 		if serr != nil {
 			return nil, serr
