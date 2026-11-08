@@ -2,3 +2,4 @@
 *.sqlite
 bin/
 dist/
+tests/perf/benchmark-hook-latest.json

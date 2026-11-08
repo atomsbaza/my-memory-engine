@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "layers": {
+    "rule":      { "dir": "rules",     "file_mode": "one-per-topic",  "expires_required": false, "inject": "always" },
+    "project":   { "dir": "projects",  "file_mode": "one-per-entity", "expires_required": false, "inject": "scope-match" },
+    "lesson":    { "dir": "lessons",   "file_mode": "one-per-fact",   "expires_required": false, "inject": "relevance" },
+    "decision":  { "dir": "decisions", "file_mode": "one-per-fact",   "expires_required": false, "inject": "scope-match" },
+    "handoff":   { "dir": "handoffs",  "file_mode": "one-per-fact",   "expires_required": true,  "inject": "relevance+not-expired" },
+    "knowledge": { "dir": "knowledge", "file_mode": "one-per-topic",  "expires_required": false, "inject": "pointer-only" }
+  },
+  "budgets_chars": { "rules": 300, "project": 400, "lesson": 500, "decision": 300, "handoff": 300, "knowledge": 300, "total": 1200 },
+  "tags": ["test", "memory", "render"],
+  "secret_patterns": [
+    "(?i)\\b(api[_-]?key|secret|password|passwd|token|bearer)\\b\\s*[:=]\\s*[\"']?[A-Za-z0-9_\\-]{16,}"
+  ],
+  "forbidden_path_fragments": ["/Users/", "/home/"]
+}
