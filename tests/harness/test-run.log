@@ -1,0 +1,35 @@
+=== RUN   TestDryRunExitsZeroAndWritesNothing
+--- PASS: TestDryRunExitsZeroAndWritesNothing (0.00s)
+=== RUN   TestApplyWithoutYesRefused
+--- PASS: TestApplyWithoutYesRefused (0.00s)
+=== RUN   TestApplyHooksCreatesBackupAndMerges
+--- PASS: TestApplyHooksCreatesBackupAndMerges (0.07s)
+=== RUN   TestApplyWarnsCoreHooksPath
+--- PASS: TestApplyWarnsCoreHooksPath (0.03s)
+=== RUN   TestApplyMCPRegistersServers
+--- PASS: TestApplyMCPRegistersServers (0.03s)
+=== RUN   TestApplyHookSymlinks
+--- PASS: TestApplyHookSymlinks (0.04s)
+=== RUN   TestApplyHookSymlinkMissingAssetFailsLoudly
+--- PASS: TestApplyHookSymlinkMissingAssetFailsLoudly (0.05s)
+=== RUN   TestApplySymlinksSkippedWithoutRepo
+--- PASS: TestApplySymlinksSkippedWithoutRepo (0.05s)
+=== RUN   TestApplyInvalidJSONWarnsAndSkips
+--- PASS: TestApplyInvalidJSONWarnsAndSkips (0.04s)
+=== RUN   TestRunUsageErrors
+--- PASS: TestRunUsageErrors (0.00s)
+=== RUN   TestRunMissingMemBinaryFails
+--- PASS: TestRunMissingMemBinaryFails (0.00s)
+=== RUN   TestCursorHooksFlatSchema
+--- PASS: TestCursorHooksFlatSchema (0.04s)
+=== RUN   TestOrderedRoundTrip
+--- PASS: TestOrderedRoundTrip (0.02s)
+=== RUN   TestSetAppendsAndReplaces
+--- PASS: TestSetAppendsAndReplaces (0.00s)
+=== RUN   TestSaveJSONFileSkipsUnchangedWrite
+--- PASS: TestSaveJSONFileSkipsUnchangedWrite (0.01s)
+=== RUN   TestLoadJSONFileRejectsTrailingGarbage
+--- PASS: TestLoadJSONFileRejectsTrailingGarbage (0.00s)
+PASS
+ok  	github.com/atomsbaza/my-memory-engine/internal/harness	0.811s
+exit=0
