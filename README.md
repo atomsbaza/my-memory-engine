@@ -38,7 +38,12 @@ S5 recall gate: recall@5 0.8667 · MRR 0.85 · 30 pairs · hook latency p50 61 m
 go build -o bin/mem ./cmd/mem      # engine
 go build -o bin/mem-install ./cmd/mem-install   # harness installer
 go test ./...                       # 15 packages, all green
+
+./bin/mem --version                 # mem version 0.1.0 (single source of truth:
+                                    # internal/version, also reported in the MCP handshake)
 ```
+
+Current release: **v0.1.0** (see git tags).
 
 No external services, no daemons, no runtime dependencies beyond the `git` CLI (used only for
 commits and explicit sync). Python 3 is **not** required.

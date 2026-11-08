@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/atomsbaza/my-memory-engine/internal/mcp"
+	"github.com/atomsbaza/my-memory-engine/internal/version"
 )
 
 // Exit codes — the contract every subcommand returns through Main.
@@ -151,6 +152,9 @@ func MainWithIO(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		switch {
 		case a == "-h" || a == "--help":
 			printHelp(env)
+			return ExitOK
+		case a == "--version":
+			fmt.Fprintf(env.Stdout, "mem version %s\n", version.Version)
 			return ExitOK
 		case a == "--home":
 			if i+1 >= len(argv) {

@@ -28,13 +28,15 @@ import (
 	"sync"
 
 	"github.com/atomsbaza/my-memory-engine/internal/store"
+	"github.com/atomsbaza/my-memory-engine/internal/version"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Server identity — MCP_SERVER_NAME/MCP_VERSION in the Python baseline.
+// Version delegates to the shared engine version (single source of truth).
 const (
 	ServerName = "my-memory"
-	Version    = "1.0.0"
+	Version    = version.Version
 )
 
 // ToolNames lists the 13 tools in Python mem's MCP_TOOLS order. Six harnesses

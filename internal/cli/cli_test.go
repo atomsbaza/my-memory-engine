@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/atomsbaza/my-memory-engine/internal/version"
 )
 
 // TestMain isolates every CLI test from the developer's real memory home:
@@ -114,7 +116,30 @@ func TestHelpExitsZero(t *testing.T) {
 	}
 }
 
-// TestHelpListsAllCommands: the command table carries all 20 subcommands.
+// TestVersionFlag: `mem --version` (before any subcommand) prints the single
+// source-of-truth version and exits 0. After a subcommand it is that
+// subcommand's problem (argparse parity: unknown flag → exit 2).
+func TestVersionFlag(t *testing.T) {
+	code, out, stderr := runMain(t, "", "--version")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %q)", code, ExitOK, stderr)
+	}
+	want := "mem version " + version.Version + "\n"
+	if out != want {
+		t.Fatalf("stdout = %q, want %q", out, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	// After the subcommand name the flag belongs to the subcommand: unknown
+	// flag → usage error exit 2 (argparse parity, not a global override).
+	code, _, _ = runMain(t, "", "verify", "--version")
+	if code != ExitGuard {
+		t.Fatalf("post-subcommand --version exit = %d, want %d", code, ExitGuard)
+	}
+}
+
 func TestHelpListsAllCommands(t *testing.T) {
 	if got := strings.Join(CommandNames(), ","); got != strings.Join(allNames(), ",") {
 		t.Fatalf("CommandNames() = %s, want %s", got, strings.Join(allNames(), ","))
