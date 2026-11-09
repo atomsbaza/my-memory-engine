@@ -66,11 +66,13 @@ func newWorkspace(t *testing.T) workspace {
 	git(t, w.a, "commit", "-q", "-m", "seed")
 	git(t, w.a, "push", "-q", "-u", "origin", "HEAD")
 	git(t, base, "clone", "-q", w.bare, w.b)
-	// Repo-local identity: CI runners have no global git user, and the
-	// rebase replay under `pull --rebase --autostash` needs a committer.
+	// Repo-local identity + no eol rewrite: CI runners have no global git
+	// user, and autocrlf=true (Git-for-Windows default) would rewrite the
+	// autostash round-trip to CRLF and corrupt byte-exact assertions.
 	for _, clone := range []string{w.a, w.b} {
 		git(t, clone, "config", "user.name", "test")
 		git(t, clone, "config", "user.email", "test@example.invalid")
+		git(t, clone, "config", "core.autocrlf", "false")
 	}
 	return w
 }
@@ -189,6 +191,7 @@ func TestLocalSyncWithoutRemoteStaysOffline(t *testing.T) {
 	git(t, dir, "init", "-q")
 	git(t, dir, "config", "user.name", "test")
 	git(t, dir, "config", "user.email", "test@example.invalid")
+	git(t, dir, "config", "core.autocrlf", "false")
 	write(t, dir, "lessons/local.md", "local only\n")
 
 	res, err := sync.Run(dir, sync.Options{})

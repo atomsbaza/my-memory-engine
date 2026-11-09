@@ -84,6 +84,17 @@ func resolved(t *testing.T, p string) string {
 	return abs
 }
 
+// samePath compares memory-root paths: byte-equal on unix; on Windows the
+// OS hands back temp paths in 8.3-short or differently-cased forms, so the
+// comparison is case-insensitive after cleaning.
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 // withGitBin swaps the git executable for the duration of the test.
 func withGitBin(t *testing.T, bin string) {
 	t.Helper()
@@ -168,7 +179,7 @@ func TestFindRootOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FindRoot: %v", err)
 		}
-		if got != resolved(t, root) {
+		if !samePath(got, resolved(t, root)) {
 			t.Errorf("walk-up: got %q, want %q", got, root)
 		}
 	})
@@ -196,7 +207,13 @@ func TestFindRootOrder(t *testing.T) {
 	t.Run("unresolvable fails loudly", func(t *testing.T) {
 		t.Setenv("MEM_HOME", "")
 		t.Setenv("MY_MEMORY_HOME", "")
-		t.Setenv("HOME", t.TempDir()) // fresh home: no ~/my-memory default to find
+		fresh := t.TempDir()
+		t.Setenv("HOME", fresh) // fresh home: no ~/my-memory default to find
+		if runtime.GOOS == "windows" {
+			// os.UserHomeDir reads USERPROFILE on Windows, not HOME — and
+			// an earlier subtest created a repo under the parent fakeHome.
+			t.Setenv("USERPROFILE", fresh)
+		}
 		chdir(t, t.TempDir())
 		got, err := FindRoot()
 		if err == nil {

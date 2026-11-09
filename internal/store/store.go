@@ -297,10 +297,16 @@ func ScanWithReport(root string) (ScanReport, error) {
 			if strings.HasPrefix(d.Name(), "_") || !strings.HasSuffix(d.Name(), ".md") {
 				return nil
 			}
+			// Rel is the store's canonical slash-separated key (verify,
+			// sync and writers compare against taxonomy dirs like
+			// "rules/"); on Windows filepath.Rel yields backslashes, so
+			// normalise here — the single choke point every scanned
+			// record passes through.
 			rootRel, rerr := filepath.Rel(root, p)
 			if rerr != nil {
 				return rerr
 			}
+			rootRel = filepath.ToSlash(rootRel)
 			rec, rerr := ReadRecord(p)
 			if rerr != nil {
 				rep.Broken = append(rep.Broken, BrokenFile{Path: p, Rel: rootRel, Problem: rerr.Error()})

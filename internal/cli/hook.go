@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -245,10 +246,9 @@ func stopCommitMessage(paths []string) string {
 	groups := map[string]int{}
 	order := []string{}
 	for _, p := range paths {
-		head := p
-		if i := strings.Index(p, "/"); i >= 0 {
-			head = p[:i]
-		}
+		// Separator-safe: git porcelain paths are slash-separated, but
+		// callers can also hand us OS-native rels.
+		head := strings.Split(filepath.ToSlash(p), "/")[0]
 		if _, seen := groups[head]; !seen {
 			order = append(order, head)
 		}

@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -128,7 +129,12 @@ func (i *Installer) validate() error {
 		return errors.New("ไม่ทราบ home directory (ตั้ง --home)")
 	}
 	fi, err := os.Stat(i.opt.MemBin)
-	if err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
+	if err != nil {
+		return fmt.Errorf("ไม่พบ executable %s — build แล้วติดตั้ง binary ก่อน (หรือใช้ --mem)", i.opt.MemBin)
+	}
+	// Windows has no execute bit: a regular file is executable there
+	// (PATHEXT governs invocation), so the 0111 test is unix-only.
+	if fi.IsDir() || (fi.Mode()&0o111 == 0 && runtime.GOOS != "windows") {
 		return fmt.Errorf("ไม่พบ executable %s — build แล้วติดตั้ง binary ก่อน (หรือใช้ --mem)", i.opt.MemBin)
 	}
 	return nil

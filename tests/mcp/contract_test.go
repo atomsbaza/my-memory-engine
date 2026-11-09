@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	scratch = dir
-	memBin = filepath.Join(dir, "mem")
+	memBin = filepath.Join(dir, "mem"+exeSuffix())
 	build := exec.Command("go", "build", "-o", memBin, "../../cmd/mem")
 	if out, berr := build.CombinedOutput(); berr != nil {
 		os.Stderr.WriteString("go build cmd/mem: " + berr.Error() + "\n" + string(out))
@@ -44,6 +45,15 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// exeSuffix returns ".exe" on Windows so exec.Command runs the built
+// binary by its literal name.
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 // fixtureHome copies the synthetic home (never the real ~/my-memory).
@@ -62,8 +72,8 @@ func env() []string {
 	return append(os.Environ(),
 		"HOME="+filepath.Join(scratch, "home"),
 		"XDG_CONFIG_HOME="+filepath.Join(scratch, "home", ".config"),
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.invalid",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.invalid",

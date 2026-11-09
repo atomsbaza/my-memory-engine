@@ -262,10 +262,8 @@ func Verify(root string) (problems, warnings []string, err error) {
 }
 
 func parentDirName(path string) string {
-	parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
-	if len(parts) < 2 {
-		return ""
-	}
-	return parts[len(parts)-2]
+	// Separator-safe: records carry either absolute OS paths (C:\...\rules\x.md
+	// on Windows) or canonical slash rels; filepath handles both.
+	return filepath.Base(filepath.Dir(path))
 }
 

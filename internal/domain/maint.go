@@ -131,6 +131,9 @@ func Archive(root string, o ArchiveOptions) (ArchiveResult, error) {
 				return fmt.Errorf("domain: archive %s: %w", c.rec.ID, merr)
 			}
 			rel, rerr := filepath.Rel(root, dest)
+			if rerr == nil {
+				rel = filepath.ToSlash(rel) // canonical slash form in reports
+			}
 			if rerr != nil {
 				return fmt.Errorf("domain: archive %s: %w", c.rec.ID, rerr)
 			}
@@ -284,6 +287,9 @@ func Promote(root string, o PromoteOptions) (PromoteResult, error) {
 				return fmt.Errorf("domain: promote %s (rule written at %s): %w", p.rec.ID, dest, werr)
 			}
 			rel, rerr := filepath.Rel(root, dest)
+			if rerr == nil {
+				rel = filepath.ToSlash(rel) // canonical slash form in reports
+			}
 			if rerr != nil {
 				return fmt.Errorf("domain: promote %s: %w", p.rec.ID, rerr)
 			}
@@ -488,6 +494,9 @@ func Compact(root string, o CompactOptions) (CompactResult, error) {
 				}
 			}
 			rel, rerr := filepath.Rel(root, dest)
+			if rerr == nil {
+				rel = filepath.ToSlash(rel) // canonical slash form in reports
+			}
 			if rerr != nil {
 				return fmt.Errorf("domain: compact %s: %w", p.scope, rerr)
 			}
