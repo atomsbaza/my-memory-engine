@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -449,6 +450,9 @@ func TestFailOpenUnwritableLog(t *testing.T) {
 // else), so a fake git on PATH is never invoked. The end-to-end push check
 // lives in internal/cli, where the engine's local commit really runs.
 func TestNoProcessSpawned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the git sentinel shim is a POSIX /bin/sh script — no Windows shell-script shim")
+	}
 	dir := t.TempDir()
 	sentinel := filepath.Join(dir, "called")
 	shim := "#!/bin/sh\nprintf 'called\\n' >> " + sentinel + "\nexit 1\n"

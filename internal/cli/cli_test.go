@@ -5,6 +5,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,6 +21,10 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HOME", scratch)
+	if runtime.GOOS == "windows" {
+		// os.UserHomeDir reads USERPROFILE on Windows, not HOME.
+		os.Setenv("USERPROFILE", scratch)
+	}
 	os.Setenv("XDG_CONFIG_HOME", filepath.Join(scratch, ".config"))
 	for _, key := range []string{"MEM_HOME", "MY_MEMORY_HOME", "MEM_AGENT"} {
 		os.Unsetenv(key)

@@ -6,6 +6,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,9 @@ import (
 // reads `mem sync` performs and fails the verbs listed in behaviour.
 func fakeGit(t *testing.T, behaviour map[string]string) (bin, logPath string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake git is a POSIX /bin/sh script — no Windows shell-script shim")
+	}
 	dir := t.TempDir()
 	logPath = filepath.Join(dir, "calls.log")
 	script := `#!/bin/sh

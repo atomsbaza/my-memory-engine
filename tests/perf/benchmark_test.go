@@ -10,9 +10,11 @@ package perf_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +35,12 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	if runtime.GOOS == "windows" {
+		// The perf harness drives the hook through bash scripts; Windows
+		// perf is out of scope for the P4 cross-platform gate.
+		fmt.Println("skip: perf harness requires bash")
+		os.Exit(0)
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		panic(err)

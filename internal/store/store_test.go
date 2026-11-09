@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -99,6 +100,10 @@ func TestFindRootOrder(t *testing.T) {
 	home := t.TempDir()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
+	if runtime.GOOS == "windows" {
+		// os.UserHomeDir reads USERPROFILE on Windows, not HOME.
+		t.Setenv("USERPROFILE", fakeHome)
+	}
 	t.Setenv("MEM_HOME", "")
 	t.Setenv("MY_MEMORY_HOME", "")
 
@@ -478,7 +483,12 @@ func TestAtomicWriteBasics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o644 {
+	if runtime.GOOS == "windows" {
+		// Windows has no POSIX mode bits: assert writable instead.
+		if info.Mode().Perm()&0o200 == 0 {
+			t.Errorf("file is read-only: %v", info.Mode().Perm())
+		}
+	} else if info.Mode().Perm() != 0o644 {
 		t.Errorf("mode = %v, want 0644", info.Mode().Perm())
 	}
 }
@@ -679,6 +689,9 @@ func TestWriteRecordGitAbsent(t *testing.T) {
 // A git repo whose commit fails: record persisted, committed=false with the
 // git stderr surfaced, one runtime-log line.
 func TestWriteRecordBrokenGit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake git is a POSIX /bin/sh script — no Windows shell-script shim (real Windows flock+git paths are covered by TestWriteRecordCommits)")
+	}
 	root := copyFixtureHome(t)
 	gitInit(t, root)
 

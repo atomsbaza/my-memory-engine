@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -255,6 +256,9 @@ func TestHookUsageErrors(t *testing.T) {
 // remote-writing subcommand appeared (AC-P2-11).
 func gitShim(t *testing.T, failing string) func() []string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("git shim is a POSIX /bin/sh script — the Windows stop-hook path is covered by TestHookStopCommitsLocally against real git")
+	}
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git not on PATH")

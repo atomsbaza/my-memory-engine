@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -223,6 +224,9 @@ func TestRemotesAndUpstream(t *testing.T) {
 // fakeGit writes a recording git stub and returns its path plus the call log.
 func fakeGit(t *testing.T, extraEnv map[string]string) (string, string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake git is a POSIX /bin/sh script — no Windows shell-script shim; real-git tests below still run")
+	}
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "calls.log")
 	script := `#!/bin/sh
