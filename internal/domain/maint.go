@@ -151,9 +151,11 @@ func Archive(root string, o ArchiveOptions) (ArchiveResult, error) {
 // Promote — proven lessons become rules (Python cmd_promote)
 // ---------------------------------------------------------------------------
 
-// PromoteOptions mirrors the `mem promote` flags. MinUses 0 becomes the
-// baseline default 3 (Python int(a.get("min_uses") or 3) — only a falsy 0
-// takes the default, a negative value is passed through like the baseline).
+// PromoteOptions mirrors the `mem promote` flags. MinUses is used verbatim;
+// the baseline's 3 default belongs to the caller — the CLI argparse supplies
+// it, the MCP layer applies it only when the argument is absent (Python
+// int(a.get("min_uses") or 3): only a falsy 0 takes the default, a negative
+// value is passed through like the baseline).
 type PromoteOptions struct {
 	MinUses int
 	Force   bool // consider uses only, not the successes==uses proof
@@ -190,9 +192,6 @@ type PromoteResult struct {
 // the lesson status=promoted with promoted_to set. Rules are written from the
 // lesson's title and body; tags, source and sensitivity carry over.
 func Promote(root string, o PromoteOptions) (PromoteResult, error) {
-	if o.MinUses == 0 {
-		o.MinUses = 3
-	}
 	res := PromoteResult{MinUses: o.MinUses, Mode: promoteMode(o.Force), DryRun: o.DryRun}
 	err := store.WithLock(root, func() error {
 		sch, err := schema.LoadSchema(root)
@@ -315,9 +314,11 @@ func promoteMode(force bool) string {
 // Compact — sleep-time handoff compaction (Python cmd_compact)
 // ---------------------------------------------------------------------------
 
-// CompactOptions mirrors the `mem compact` flags. A zero Days/MinGroup becomes
-// the baseline default 7 / 3 (Python int(a.get("days") or 7): only a falsy 0
-// takes the default).
+// CompactOptions mirrors the `mem compact` flags. Days and MinGroup are used
+// verbatim; the baseline's 7 / 3 defaults belong to the caller — the CLI
+// argparse supplies them, the MCP layer applies them only when the argument
+// is absent (Python int(a.get("days") or 7): only a falsy 0 takes the
+// default).
 type CompactOptions struct {
 	Days     int
 	MinGroup int
@@ -353,12 +354,6 @@ type CompactResult struct {
 // opts.MinGroup of them. The handoffs are marked status=compacted with
 // compacted_into set, and their bullet list carries each id as evidence.
 func Compact(root string, o CompactOptions) (CompactResult, error) {
-	if o.Days == 0 {
-		o.Days = 7
-	}
-	if o.MinGroup == 0 {
-		o.MinGroup = 3
-	}
 	res := CompactResult{Days: o.Days, MinGroup: o.MinGroup, DryRun: o.DryRun}
 	err := store.WithLock(root, func() error {
 		sch, err := schema.LoadSchema(root)

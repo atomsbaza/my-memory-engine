@@ -60,14 +60,36 @@ mem trace "security guard"          # RRF breakdown + layer allocation
 mem add --layer lesson --scope global --file - --title "..." < note.md
 mem verify                          # schema/secret/path/dup/index audit
 mem stats                           # counts, sources, decay buckets, harness coverage
-mem archive --dry-run               # retention-based archival plan
-mem promote --dry-run               # lesson → rule candidates
-mem compact --dry-run               # old handoff → knowledge plan
+mem archive --dry-run               # retention-based archival plan (--threshold F to retune)
+mem promote --dry-run               # lesson → rule candidates (--min-uses N, --force)
+mem promote --scan --notify         # mechanical candidates file for the /promote-lessons skill
+mem compact --dry-run               # old handoff → knowledge plan (--days N, --min-group N)
 mem eval --json                     # retrieval gate against baseline
 
 mem mcp                             # MCP server on stdio (wire from any MCP client)
 mem hook --agent claude --event user-prompt --format json   # harness hook entry point
 ```
+
+### Lifecycle (archive / promote / compact)
+
+The three maintenance verbs share one contract: **plan first, then mutate** — every id check and
+content guard resolves before the first byte is written, so a refusal never leaves a half run.
+All three are read-only with `--dry-run` (exit 0) and re-index after a real write.
+
+- `mem archive [--threshold F] [--dry-run]` — moves active records whose retention score
+  $S = \text{decay}\cdot 2^{-d/h}\cdot(1+\ln(1+u))\cdot\text{urgency}$ falls below the threshold
+  (default 0.15) into `_archive/<layer>/` with `status=archived`.
+- `mem promote [--min-uses N] [--force] [--dry-run]` — turns proven lessons (default strict:
+  `successes > 0` and `successes == uses`) into rules and marks the lesson `status=promoted`.
+- `mem promote --scan [--notify]` — the mechanical half of promotion: groups active lessons by
+  primary tag (cross-referencing `ops/failures/*.md`, no LLM) into `ops/promotions-candidates.md`,
+  rewriting the file **only when the content changed** (the timestamp header is excluded from the
+  digest). `--notify` posts a macOS notification only on a real change — this is what the
+  `com.pisit.mem-promote` LaunchAgent cron runs. Judgment and approval stay in the
+  `/promote-lessons` skill; the scan never applies anything.
+- `mem compact [--days N] [--min-group N] [--dry-run]` — folds handoffs older than `--days`
+  (default 7, by `last_used` else `created`) into one `knowledge` record per scope once a scope
+  has `--min-group` (default 3) of them, marking each `status=compacted`.
 
 ## Architecture
 

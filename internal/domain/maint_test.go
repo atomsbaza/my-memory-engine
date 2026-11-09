@@ -110,7 +110,7 @@ func TestPromoteStrictVersusForce(t *testing.T) {
 			fm["successes"] = 1
 		})
 
-	strict, err := Promote(root, PromoteOptions{DryRun: true})
+	strict, err := Promote(root, PromoteOptions{MinUses: 3, DryRun: true})
 	if err != nil {
 		t.Fatalf("promote dry run: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestPromoteStrictVersusForce(t *testing.T) {
 		t.Fatalf("dry run promoted %d records", len(strict.Promoted))
 	}
 
-	force, err := Promote(root, PromoteOptions{Force: true, DryRun: true})
+	force, err := Promote(root, PromoteOptions{MinUses: 3, Force: true, DryRun: true})
 	if err != nil {
 		t.Fatalf("promote force dry run: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestPromoteStrictVersusForce(t *testing.T) {
 		t.Fatalf("force candidates = %d, want 2 (uses only)", len(force.Candidates))
 	}
 
-	res, err := Promote(root, PromoteOptions{})
+	res, err := Promote(root, PromoteOptions{MinUses: 3})
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestPromoteRefusesBeforeWriting(t *testing.T) {
 				fm["successes"] = 3
 			})
 		before := ruleCount(t, root)
-		_, err := Promote(root, PromoteOptions{})
+		_, err := Promote(root, PromoteOptions{MinUses: 3})
 		wantDomainErr(t, err, 2, "secret")
 		if got := ruleCount(t, root); got != before {
 			t.Fatalf("rules on disk = %d, want %d — the refusal must precede the write", got, before)
@@ -209,7 +209,7 @@ func TestPromoteRefusesBeforeWriting(t *testing.T) {
 			t.Fatalf("write duplicate lesson: %v", werr)
 		}
 		before := ruleCount(t, root)
-		_, err := Promote(root, PromoteOptions{})
+		_, err := Promote(root, PromoteOptions{MinUses: 3})
 		wantDomainErr(t, err, 3, "ซ้ำกับ")
 		if got := ruleCount(t, root); got != before {
 			t.Fatalf("rules on disk = %d, want %d — nothing may be written", got, before)
@@ -237,7 +237,7 @@ func TestCompactFoldsOldHandoffsPerScope(t *testing.T) {
 		})
 
 	// Too high a group minimum selects nothing.
-	none, err := Compact(root, CompactOptions{MinGroup: 9, DryRun: true})
+	none, err := Compact(root, CompactOptions{Days: 7, MinGroup: 9, DryRun: true})
 	if err != nil {
 		t.Fatalf("compact dry run: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestCompactFoldsOldHandoffsPerScope(t *testing.T) {
 		t.Fatalf("groups with min-group 9 = %+v, want none", none.Groups)
 	}
 
-	dry, err := Compact(root, CompactOptions{DryRun: true})
+	dry, err := Compact(root, CompactOptions{Days: 7, MinGroup: 3, DryRun: true})
 	if err != nil {
 		t.Fatalf("compact dry run: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestCompactFoldsOldHandoffsPerScope(t *testing.T) {
 		}
 	}
 
-	res, err := Compact(root, CompactOptions{})
+	res, err := Compact(root, CompactOptions{Days: 7, MinGroup: 3})
 	if err != nil {
 		t.Fatalf("compact: %v", err)
 	}

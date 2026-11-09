@@ -1,6 +1,6 @@
 // Package cli implements the mem command surface (design §6 "cli" row):
-// the 18 subcommands of the Python baseline plus `init` and `doctor`, their
-// flags and their exit-code contract.
+// the 21 subcommands of the Python baseline plus `init`, `doctor` and
+// `embed`, their flags and their exit-code contract.
 //
 // Exit-code contract (Python baseline mem; design §7 write path):
 //
@@ -44,15 +44,15 @@ const (
 // (NFR-COMPAT-01, AC-P2-07).
 const (
 	// LegacyCommandCount is the Python baseline's add_parser count.
-	LegacyCommandCount = 18
-	// CommandCount is the full surface: 18 legacy families + init + doctor
+	LegacyCommandCount = 21
+	// CommandCount is the full surface: 21 legacy families + init + doctor
 	// + embed (the embedding-mode family is an engine-only additive surface).
 	CommandCount = LegacyCommandCount + 3
 )
 
 // usage is the top-level usage line; mirrors Python mem's argparse banner with
 // the engine-only commands appended.
-const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,add,touch,cite,review,supersede,verify,reindex,render,sync,import,hook,stats,eval,mcp,init,doctor,embed} ..."
+const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed} ..."
 
 // banner is the one-line description printed under usage.
 const banner = "portable agent memory (markdown + git)"
@@ -84,8 +84,8 @@ type Env struct {
 	Stderr io.Writer
 }
 
-// commands is the 20-command registry: the 18 legacy families in Python mem's
-// order, then the two engine-only commands.
+// commands is the 24-command registry: the 21 legacy families in Python mem's
+// order, then the three engine-only commands.
 var commands = []command{
 	{Entry: Entry{Name: "context", Args: "[--project P] [--scope S] [--query Q] [--budget N] [--no-touch] [--quiet]", Help: "ดึงความจำที่เกี่ยวข้องกับงาน", Legacy: true}, run: cmdContext},
 	{Entry: Entry{Name: "search", Args: "<query> [--scope S] [--layer L]... [--limit N] [--all] [--scores]", Help: "ค้น record", Legacy: true}, run: cmdSearch},
@@ -98,6 +98,9 @@ var commands = []command{
 	{Entry: Entry{Name: "supersede", Args: "<old> --with <new> [--no-commit]", Help: "แทนที่ record เก่าด้วยอันใหม่", Legacy: true}, run: cmdSupersede},
 	{Entry: Entry{Name: "verify", Args: "", Help: "ตรวจ schema/secret/path/dup/index", Legacy: true}, run: cmdVerify},
 	{Entry: Entry{Name: "reindex", Args: "", Help: "สร้าง index ใหม่ (derived)", Legacy: true}, run: cmdReindex},
+	{Entry: Entry{Name: "archive", Args: "[--threshold F] [--dry-run]", Help: "ย้าย record ที่ retention score ต่ำไป _archive/<layer>/ (status=archived)", Legacy: true}, run: cmdArchive},
+	{Entry: Entry{Name: "promote", Args: "[--min-uses N] [--force] [--dry-run] [--scan] [--notify]", Help: "เลื่อน lesson ที่พิสูจน์แล้วเป็น rule (uses/successes ผ่านเกณฑ์)", Legacy: true}, run: cmdPromote},
+	{Entry: Entry{Name: "compact", Args: "[--days N] [--min-group N] [--dry-run]", Help: "รวม handoff เก่าเป็น knowledge เดียวต่อ scope (sleep-time compaction)", Legacy: true}, run: cmdCompact},
 	{Entry: Entry{Name: "render", Args: "[--agent A]... [--dry-run] [--print]", Help: "อัปเดต pointer block ในไฟล์ของแต่ละ agent", Legacy: true}, run: cmdRender},
 	{Entry: Entry{Name: "sync", Args: "[-m MSG] [--no-push]", Help: "commit + pull --rebase + push", Legacy: true}, run: cmdSync},
 	{Entry: Entry{Name: "import", Args: "<kirocrew|dir> [--path P] [--apply]", Help: "ดึงความจำจากระบบอื่น (เข้า repo นี้)", Legacy: true}, run: cmdImport},

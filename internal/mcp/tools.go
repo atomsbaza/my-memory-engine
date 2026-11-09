@@ -934,8 +934,14 @@ func renderArchive(res domain.ArchiveResult) string {
 // ---------------------------------------------------------------------------
 
 func (s *server) handlePromote(_ context.Context, _ *mcpsdk.CallToolRequest, in PromoteArgs) (*mcpsdk.CallToolResult, any, error) {
+	// Python int(a.get("min_uses") or 3): an absent (zero) argument takes the
+	// baseline default; the domain now takes MinUses verbatim.
+	minUses := in.MinUses
+	if minUses == 0 {
+		minUses = 3
+	}
 	res, err := domain.Promote(s.root, domain.PromoteOptions{
-		MinUses: in.MinUses, Force: in.Force, DryRun: in.DryRun,
+		MinUses: minUses, Force: in.Force, DryRun: in.DryRun,
 	})
 	return result(renderPromote(res), errText(err), err != nil)
 }
@@ -965,8 +971,18 @@ func renderPromote(res domain.PromoteResult) string {
 // ---------------------------------------------------------------------------
 
 func (s *server) handleCompact(_ context.Context, _ *mcpsdk.CallToolRequest, in CompactArgs) (*mcpsdk.CallToolResult, any, error) {
+	// Python int(a.get("days") or 7) / int(a.get("min_group") or 3): absent
+	// (zero) arguments take the baseline defaults; the domain takes the
+	// options verbatim.
+	days, minGroup := in.Days, in.MinGroup
+	if days == 0 {
+		days = 7
+	}
+	if minGroup == 0 {
+		minGroup = 3
+	}
 	res, err := domain.Compact(s.root, domain.CompactOptions{
-		Days: in.Days, MinGroup: in.MinGroup, DryRun: in.DryRun,
+		Days: days, MinGroup: minGroup, DryRun: in.DryRun,
 	})
 	return result(renderCompact(res), errText(err), err != nil)
 }

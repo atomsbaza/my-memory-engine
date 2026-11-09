@@ -1,6 +1,6 @@
 # mem command surface
 
-21 commands: 18 legacy Python families + `init` + `doctor` + `embed`.
+24 commands: 21 legacy Python families + `init` + `doctor` + `embed`.
 
 Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 
@@ -17,6 +17,9 @@ Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 | `supersede` | `<old> --with <new> [--no-commit]` | แทนที่ record เก่าด้วยอันใหม่ | legacy |
 | `verify` | `—` | ตรวจ schema/secret/path/dup/index | legacy |
 | `reindex` | `—` | สร้าง index ใหม่ (derived) | legacy |
+| `archive` | `[--threshold F] [--dry-run]` | ย้าย record ที่ retention score ต่ำไป _archive/<layer>/ (status=archived) | legacy |
+| `promote` | `[--min-uses N] [--force] [--dry-run] [--scan] [--notify]` | เลื่อน lesson ที่พิสูจน์แล้วเป็น rule (uses/successes ผ่านเกณฑ์) | legacy |
+| `compact` | `[--days N] [--min-group N] [--dry-run]` | รวม handoff เก่าเป็น knowledge เดียวต่อ scope (sleep-time compaction) | legacy |
 | `render` | `[--agent A]... [--dry-run] [--print]` | อัปเดต pointer block ในไฟล์ของแต่ละ agent | legacy |
 | `sync` | `[-m MSG] [--no-push]` | commit + pull --rebase + push | legacy |
 | `import` | `<kirocrew|dir> [--path P] [--apply]` | ดึงความจำจากระบบอื่น (เข้า repo นี้) | legacy |

@@ -37,8 +37,8 @@ func TestMain(m *testing.M) {
 // legacyNames is the frozen Python `add_parser` manifest (E4 snapshot shape).
 var legacyNames = []string{
 	"context", "search", "list", "show", "add", "touch", "cite",
-	"review", "supersede", "verify", "reindex", "render", "sync",
-	"import", "hook", "stats", "eval", "mcp",
+	"review", "supersede", "verify", "reindex", "archive", "promote",
+	"compact", "render", "sync", "import", "hook", "stats", "eval", "mcp",
 }
 
 func TestManifestCounts(t *testing.T) {
@@ -50,7 +50,7 @@ func TestManifestCounts(t *testing.T) {
 		t.Fatalf("Manifest() = %d commands, want CommandCount %d", len(manifest), CommandCount)
 	}
 	if CommandCount != LegacyCommandCount+3 {
-		t.Fatalf("CommandCount = %d, want 18 legacy + init + doctor + embed", CommandCount)
+		t.Fatalf("CommandCount = %d, want 21 legacy + init + doctor + embed", CommandCount)
 	}
 	for i, name := range legacyNames {
 		if manifest[i].Name != name {
@@ -155,7 +155,7 @@ func TestHelpListsAllCommands(t *testing.T) {
 			t.Errorf("root help does not mention %q", name)
 		}
 	}
-	if !strings.Contains(out, "{context,search,list,show,add,touch,cite,review,supersede,verify,reindex,render,sync,import,hook,stats,eval,mcp,init,doctor,embed}") {
+	if !strings.Contains(out, "{context,search,list,show,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed}") {
 		t.Errorf("usage line does not list the full surface:\n%s", out)
 	}
 }

@@ -164,12 +164,12 @@ agent ทุกตัวของผู้ใช้ (6 harness) จำสิ่�
 #### REQ-CLI-01 · Command surface
 
 **EARS**
-- THE SYSTEM SHALL expose the 18 legacy command families (`context, search, list, show, add, touch, cite, review, supersede, verify, reindex, render, sync, import, hook, stats, eval, mcp`) plus `init` and `doctor`.
+- THE SYSTEM SHALL expose the 21 legacy command families (`context, search, list, show, add, touch, cite, review, supersede, verify, reindex, archive, promote, compact, render, sync, import, hook, stats, eval, mcp`) plus `init`, `doctor` and `embed` — the three lifecycle verbs (`archive`, `promote` incl. `--scan`/`--notify`, `compact`) are the Python bin/mem phase-2 ports (2026-11-10).
 - WHEN `init` runs, THE SYSTEM SHALL scaffold a usable memory home for a new user without touching an existing one.
 - WHEN `doctor` runs, THE SYSTEM SHALL report file↔index↔remote consistency.
 
-**Trace:** `design.md` §3.2 (18 + init + doctor) · §6.1 cli row · `plan.md` P2.2
-**Verify:** command manifest test ยืนยัน 18 legacy + `init` + `doctor`; `init` บน temp HOME แล้ว `verify` = 0 problems; `doctor` ตรวจจับ index ขาด/remote ไม่ตั้ง
+**Trace:** `design.md` §3.2 (21 + init/doctor/embed) · §6.1 cli row · `plan.md` P2.2 · `bin/mem` phase-2 lifecycle
+**Verify:** command manifest test ยืนยัน 21 legacy + `init` + `doctor` + `embed`; `init` บน temp HOME แล้ว `verify` = 0 problems; `doctor` ตรวจจับ index ขาด/remote ไม่ตั้ง
 
 #### REQ-CLI-02 · Exit codes + machine-readable output
 
