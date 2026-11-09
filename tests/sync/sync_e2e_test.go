@@ -66,6 +66,12 @@ func newWorkspace(t *testing.T) workspace {
 	git(t, w.a, "commit", "-q", "-m", "seed")
 	git(t, w.a, "push", "-q", "-u", "origin", "HEAD")
 	git(t, base, "clone", "-q", w.bare, w.b)
+	// Repo-local identity: CI runners have no global git user, and the
+	// rebase replay under `pull --rebase --autostash` needs a committer.
+	for _, clone := range []string{w.a, w.b} {
+		git(t, clone, "config", "user.name", "test")
+		git(t, clone, "config", "user.email", "test@example.invalid")
+	}
 	return w
 }
 
@@ -181,6 +187,8 @@ func TestLocalSyncConflictNamesFileAndDoesNotPush(t *testing.T) {
 func TestLocalSyncWithoutRemoteStaysOffline(t *testing.T) {
 	dir := t.TempDir()
 	git(t, dir, "init", "-q")
+	git(t, dir, "config", "user.name", "test")
+	git(t, dir, "config", "user.email", "test@example.invalid")
 	write(t, dir, "lessons/local.md", "local only\n")
 
 	res, err := sync.Run(dir, sync.Options{})

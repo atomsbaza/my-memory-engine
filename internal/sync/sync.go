@@ -178,7 +178,11 @@ func CommitAll(root, message string, o Options) (int, error) {
 	if message == "" {
 		message = fmt.Sprintf("mem: sync (%d files)", len(paths))
 	}
-	if _, err := o.git(root, "commit", "-m", message); err != nil {
+	// Hermetic identity, like store.commitMsg: the commit must not depend
+	// on the machine's global git config (absent on fresh CI runners).
+	if _, err := o.git(root,
+		"-c", "user.name=mem-engine", "-c", "user.email=mem-engine@localhost",
+		"commit", "-m", message); err != nil {
 		return len(paths), err
 	}
 	return len(paths), nil

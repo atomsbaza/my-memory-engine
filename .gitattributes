@@ -1,0 +1,4 @@
+# Force LF working trees on every platform: the test suite compares
+# generated docs byte-for-byte (docs/cli-commands.md) and parses fixture
+# records as bytes — a CRLF checkout (Windows default) would break both.
+* text=auto eol=lf

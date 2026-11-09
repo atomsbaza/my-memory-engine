@@ -70,6 +70,13 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 	out := map[string]string{}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// A path can vanish between ReadDir and lstat when git's
+			// background bookkeeping (e.g. objects/maintenance.lock)
+			// churns inside .git mid-walk — those entries are excluded
+			// from the snapshot anyway. Never swallow a vanished root.
+			if path != root && os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 		rel, rerr := filepath.Rel(root, path)
@@ -162,15 +169,21 @@ func TestRenderWritesBlockAndSkips(t *testing.T) {
 	home := fixtureHome(t)
 	renderFile := filepath.Join(t.TempDir(), "AGENTS.md")
 	pullFile := filepath.Join(t.TempDir(), "pulled.md")
-	writeFile(t, home, "schema/agents.json", `{
-  "version": 2,
-  "agents": [
-    {"name": "alpha", "mode": "render", "file": "`+renderFile+`", "create": true, "budget": 5400},
-    {"name": "pointy", "mode": "pointer", "file": "`+filepath.Join(t.TempDir(), "pointer.md")+`", "create": true},
-    {"name": "pullonly", "mode": "pull", "file": "`+pullFile+`", "create": false},
-    {"name": "toolonly", "mode": "tool", "file": "`+filepath.Join(t.TempDir(), "none.md")+`", "create": false}
-  ]
-}`)
+	// Built via json.Marshal, not string interpolation: Windows temp paths
+	// contain backslashes that would produce invalid JSON escapes.
+	agentsDoc, err := json.Marshal(map[string]any{
+		"version": 2,
+		"agents": []map[string]any{
+			{"name": "alpha", "mode": "render", "file": renderFile, "create": true, "budget": 5400},
+			{"name": "pointy", "mode": "pointer", "file": filepath.Join(t.TempDir(), "pointer.md"), "create": true},
+			{"name": "pullonly", "mode": "pull", "file": pullFile, "create": false},
+			{"name": "toolonly", "mode": "tool", "file": filepath.Join(t.TempDir(), "none.md"), "create": false},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, home, "schema/agents.json", string(agentsDoc))
 
 	code, out, stderr := runHome(t, home, "", "render", "--dry-run")
 	mustCode(t, ExitOK, code, out, stderr, "render --dry-run")

@@ -269,7 +269,9 @@ func gitShim(t *testing.T, failing string) func() []string {
 	script.WriteString("#!/bin/sh\n")
 	script.WriteString("printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n")
 	if failing != "" {
-		script.WriteString("if [ \"$1\" = " + shellQuote(failing) + " ]; then echo fake-git-failure >&2; exit 1; fi\n")
+		// The verb may not be $1: product commits carry `-c user.*` ahead
+		// of it (sync.CommitAll), so fail when any argument equals it.
+		script.WriteString("for a in \"$@\"; do if [ \"$a\" = " + shellQuote(failing) + " ]; then echo fake-git-failure >&2; exit 1; fi; done\n")
 	}
 	script.WriteString("exec " + shellQuote(realGit) + " \"$@\"\n")
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script.String()), 0o755); err != nil {
@@ -336,8 +338,12 @@ sensitivity: internal
 		if remoteWrite(call) {
 			t.Fatalf("stop hook reached the network: %q", call)
 		}
-		if strings.HasPrefix(call, "commit") {
-			seenCommit = true
+		// The commit argv now carries hermetic `-c user.*` flags ahead of
+		// the verb (sync.CommitAll), so match the verb anywhere.
+		for _, f := range strings.Fields(call) {
+			if f == "commit" {
+				seenCommit = true
+			}
 		}
 	}
 	if !seenCommit {
