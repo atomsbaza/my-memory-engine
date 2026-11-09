@@ -1,0 +1,44 @@
+# CI matrix for the engine: build + vet + full test suite on all three
+# developer platforms, plus a dedicated FTS5 native probe so the gate
+# evidence (P4/G3) always has an explicit, greppable FTS5-on-OS answer.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: Build
+        run: go build ./cmd/mem ./cmd/mem-install
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -count=1
+      # Surfaces FTS5-on-OS evidence: TestSearchFTSSemantics fails loudly if
+      # the bundled SQLite ever falls back to a non-FTS index on any OS.
+      - name: FTS5 native probe
+        run: go test ./internal/index/ -run TestSearchFTSSemantics -v -count=1
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2

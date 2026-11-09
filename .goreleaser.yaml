@@ -1,0 +1,42 @@
+# GoReleaser config — snapshot builds via `goreleaser build --snapshot --clean`;
+# real releases are cut on tag push (v*) by the owner, never from CI.
+version: 2
+
+project_name: mem
+
+builds:
+  - id: mem
+    main: ./cmd/mem
+    binary: mem
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      # windows/arm64 is skipped deliberately: no consumer, no CI leg, and
+      # no way to exercise it — darwin/linux arm64 stay in because the
+      # owner's machines and the macos-latest CI runner are arm64.
+      - goos: windows
+        goarch: arm64
+  - id: mem-install
+    main: ./cmd/mem-install
+    binary: mem-install
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat'
+    - title: Fixes
+      regexp: '^fix'
+    - title: Others
