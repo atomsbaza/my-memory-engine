@@ -170,7 +170,11 @@ func FindRoot() (string, error) {
 	if cwd, err := os.Getwd(); err == nil {
 		for cand := cwd; ; {
 			if isMemoryRepo(cand) {
-				return cand, nil
+				// Resolve like every other branch (Abs + EvalSymlinks):
+				// on Windows the cwd comes back 8.3-short
+				// (C:\Users\RUNNER~1\...) and callers compare against
+				// the resolved form.
+				return expandHome(cand)
 			}
 			parent := filepath.Dir(cand)
 			if parent == cand {

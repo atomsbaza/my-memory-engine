@@ -637,7 +637,9 @@ func TestRecColumnsMirrorPython(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rec row: %v", err)
 	}
-	if id != thaiID || path != filepath.Join("knowledge", "thai-memory-knowledge.0a0a0a03.md") ||
+	// The rec.path key is the canonical slash rel (Python parity), not an
+	// OS-native join — filepath.Join would demand backslashes on Windows.
+	if id != thaiID || path != "knowledge/thai-memory-knowledge.0a0a0a03.md" ||
 		layer != "knowledge" || scope != "project:demo" || status != "active" ||
 		title != "ความจำถาวร" || tags != "thai" || created != "2026-01-04" || lastUsed != "" {
 		t.Fatalf("rec columns = id=%q path=%q layer=%q scope=%q status=%q title=%q tags=%q created=%q last_used=%q",
