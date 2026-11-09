@@ -124,9 +124,31 @@ The Python CLI in the data repo is **read-only legacy** (tag `python-final`): wr
 - This repo must never contain real corpus records, prompt logs, personal data or secrets —
   `testdata/` holds synthetic fixtures with provenance labels only, enforced by the hygiene gate.
 - Real data (records, parity artifacts, spike outputs) lives in the private data repo.
-- The repo is currently **private**. Making it public additionally requires the owner's recorded
-  approval (`parity/P4/status.md` in the data repo tracks the remaining gate items: G3
-  cross-platform native evidence and the publication signature).
+- The repo is **public (MIT)** — the visibility flip was made on 2026-11-10 with the owner's
+  recorded approval (`parity/P4/public-approval.md` in the data repo); making it public is done.
+  The hygiene gates above still apply unchanged.
+
+## Semantic search (optional)
+
+Embeddings are **off by default** — retrieval is byte-identical to the pre-embedding engine
+(no network, no dense stream, `--scores`/`trace` output unchanged). An opt-in local mode adds
+semantic ranks as a 4th RRF list (cosine over 400-rune chunks, `w_dense=1.2`, k=60):
+
+```bash
+brew install ollama && brew services start ollama   # หรือ `ollama serve`
+ollama pull nomic-embed-text                        # 768-dim · 274 MB
+mem embed set ollama                                # เขียน block ใน schema/taxonomy.json (มี .bak-<ts>)
+mem reindex                                         # สร้าง emb table (~22s สำหรับ ~1.4k chunks)
+```
+
+- `mem embed status [--json]` — provider/model/dim, index emb counts, ollama reachable.
+- `mem embed set off` + `mem reindex` — กลับ off-mode อย่างสมบูรณ์ (DROP emb table + meta).
+- Model mismatch (index ≠ config) fails loudly on search (`mem reindex` required); the
+  user-prompt hook fail-opens instead (runtime log) so a dead ollama never breaks a turn.
+- **Privacy: local only.** All embedding calls go to `http://127.0.0.1:11434` on this machine;
+  nothing leaves it. Remote providers are explicitly out of scope for now.
+- Measured on the real corpus (see `parity/P4/embedding-spike.md` in the data repo):
+  Δrecall@5 = 0.0000 vs off — off remains the shipped default.
 
 ## Docs
 

@@ -106,7 +106,8 @@ func TestBinaryInitVerifyDoctor(t *testing.T) {
 	}
 }
 
-// TestBinaryManifest: the help table is the 18 legacy families + init + doctor.
+// TestBinaryManifest: the help table is the 18 legacy families + init +
+// doctor + embed.
 func TestBinaryManifest(t *testing.T) {
 	code, out, stderr := runBin(t, "", "--help")
 	if code != 0 {
@@ -115,7 +116,7 @@ func TestBinaryManifest(t *testing.T) {
 	for _, name := range []string{
 		"context", "search", "list", "show", "add", "touch", "cite", "review",
 		"supersede", "verify", "reindex", "render", "sync", "import", "hook",
-		"stats", "eval", "mcp", "init", "doctor",
+		"stats", "eval", "mcp", "init", "doctor", "embed",
 	} {
 		if !strings.Contains(out, "\n  "+name) {
 			t.Fatalf("help table is missing %s:\n%s", name, out)

@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,8 +11,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/atomsbaza/my-memory-engine/internal/domain"
+	"github.com/atomsbaza/my-memory-engine/internal/embed"
 	"github.com/atomsbaza/my-memory-engine/internal/index"
 	"github.com/atomsbaza/my-memory-engine/internal/schema"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
@@ -173,7 +176,9 @@ func runGitInit(root string) (string, error) {
 	return string(out), err
 }
 
-// cmdReindex rebuilds the derived index (Python cmd_reindex).
+// cmdReindex rebuilds the derived index (Python cmd_reindex) — mode-aware:
+// with embeddings off it provably drops the emb table; with a provider
+// configured it re-embeds every record chunk and prints the mode it used.
 func cmdReindex(e *Env, c command, argv []string) int {
 	fs := e.flagSet(c)
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
@@ -183,6 +188,11 @@ func cmdReindex(e *Env, c command, argv []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
+	sch, err := e.schemaOf(root)
+	if err != nil {
+		return e.fail(err)
+	}
+	cfg := sch.Embedding.WithDefaults()
 	if err := domain.ReindexRoot(root); err != nil {
 		return e.fail(err)
 	}
@@ -199,7 +209,40 @@ func cmdReindex(e *Env, c command, argv []string) int {
 		// Degraded mode must be reported, never presented as ranked search.
 		fmt.Fprintf(e.Stderr, "mem: FTS5 ไม่พร้อม — index ใช้ substring fallback (AC-P1-09)\n")
 	}
-	fmt.Fprintf(e.Stdout, "index: %d records\n", len(recs))
+	provider := embed.NewFromConfig(cfg)
+	switch p := provider.(type) {
+	case nil:
+		// Off mode: the index is provably emb-free.
+		if err := ix.DropEmb(); err != nil {
+			return e.fail(err)
+		}
+		fmt.Fprintf(e.Stdout, "index: %d records · embedding: off (ไม่มี emb table)\n", len(recs))
+	case *embed.Ollama:
+		started := time.Now()
+		rows, berr := buildEmbRows(p, recs)
+		if berr != nil {
+			return e.fail(berr)
+		}
+		if len(rows) == 0 {
+			if err := ix.DropEmb(); err != nil {
+				return e.fail(err)
+			}
+			fmt.Fprintf(e.Stdout, "index: %d records · embedding: %s (ไม่มี chunk ให้ embed)\n", len(recs), cfg.Provider)
+			return ExitOK
+		}
+		dim := len(rows[0].Vec) / 4
+		if err := ix.SetEmb(rows, p.Model(), dim); err != nil {
+			return e.fail(err)
+		}
+		fmt.Fprintf(e.Stdout, "index: %d records · embedding: %s/%s · %d chunks (%dd, %.1fs)\n",
+			len(recs), p.Name(), p.Model(), len(rows), dim, time.Since(started).Seconds())
+	default:
+		// Unknown provider: loud at first use — reindex must not guess.
+		if _, uerr := p.Embed(context.Background(), []string{"ping"}); uerr != nil {
+			return e.fail(uerr)
+		}
+		return e.fail(fmt.Errorf("reindex: provider %T ไม่รองรับ", p))
+	}
 	return ExitOK
 }
 

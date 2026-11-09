@@ -68,6 +68,11 @@ type Options struct {
 	Days         int  // recall-log window; default 14
 	Weights      string
 	SaveBaseline bool
+
+	// Dense is the semantic rank seam (embedding mode on; nil = off). When
+	// set, every pair's query is embedded once and the dense list fuses
+	// into the RRF — the ON/OFF S5 comparison measures exactly this.
+	Dense func(query string, limit int) ([]string, error)
 }
 
 // echoIDRe mirrors Python ECHO_ID_RE — the "[id: <layer>.<hex>]" tag that
@@ -254,7 +259,7 @@ func Run(root string, o Options) (Result, error) {
 
 		picked, perr := domain.PickForQuery(recs, domain.RetrievalOptions{
 			Query: p.Query, Threshold: thr, Limit: 5, Scoring: &sc, FTS: fts,
-			Indexed: fts != nil,
+			Dense: o.Dense, Indexed: fts != nil,
 		})
 		if perr != nil {
 			return Result{}, perr
@@ -292,7 +297,7 @@ func Run(root string, o Options) (Result, error) {
 		}
 		picked, perr := domain.PickForQuery(recs, domain.RetrievalOptions{
 			Query: p.Query, Threshold: 5.0, Limit: 5, Scoring: &sc, FTS: fts,
-			Indexed: fts != nil,
+			Dense: o.Dense, Indexed: fts != nil,
 		})
 		if perr != nil {
 			return Result{}, perr

@@ -31,6 +31,18 @@ func cmdEval(e *Env, c command, argv []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
+	// Dense seam: nil in off mode — the OFF eval run is the exact
+	// pre-embedding retrieval. A model mismatch is loud: the gate must
+	// never read stale dense ranks as a PASS.
+	sch, err := e.schemaOf(root)
+	if err != nil {
+		return e.fail(err)
+	}
+	dense, denseCloser, derr := e.denseSeam(root, sch.Embedding.WithDefaults())
+	if derr != nil {
+		return e.fail(derr)
+	}
+	defer denseCloser()
 
 	rows := readRecallRows(root, *days)
 	injected, cited, echoed := noiseSets(rows)
@@ -39,7 +51,7 @@ func cmdEval(e *Env, c command, argv []string) int {
 		return e.proposeFromLog(rows, injected, cited, echoed)
 	}
 
-	res, err := eval.Run(root, eval.Options{Days: *days, Weights: *weights, SaveBaseline: *saveBaseline})
+	res, err := eval.Run(root, eval.Options{Days: *days, Weights: *weights, SaveBaseline: *saveBaseline, Dense: dense})
 	if err != nil {
 		return e.fail(err)
 	}

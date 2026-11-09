@@ -145,6 +145,27 @@ func (h hookEngine) Recall(call hook.Call) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Dense seam (semantic mode): nil when off. A mismatch/transport failure
+	// must not break the user's turn (REQ-HOOK-02) — wiring failures are
+	// logged and the recall proceeds dense-less; a runtime embed failure
+	// (ollama dying mid-session) degrades the same way, observable in the
+	// runtime log, while search/eval keep failing loudly.
+	dense, denseCloser, derr := e.denseSeam(root, sch.Embedding.WithDefaults())
+	if derr != nil {
+		appendRuntimeLog(root, "hook dense seam: "+firstLine(derr.Error()))
+		dense = nil
+	} else if dense != nil {
+		inner := dense
+		dense = func(query string, limit int) ([]string, error) {
+			ids, err := inner(query, limit)
+			if err != nil {
+				appendRuntimeLog(root, "hook dense search: "+firstLine(err.Error()))
+				return nil, nil // fail-open: no dense stream for this recall
+			}
+			return ids, nil
+		}
+	}
+	defer denseCloser()
 	fts, closer, err := e.ftsSeam(root, false)
 	if err != nil {
 		return "", err
@@ -155,7 +176,6 @@ func (h hookEngine) Recall(call hook.Call) (string, error) {
 	if threshold == 0 {
 		threshold = domain.DefaultScoring.ThresholdHook
 	}
-
 	picked, err := domain.PickForQuery(recs, domain.RetrievalOptions{
 		Query:     call.Query,
 		Scope:     call.Scope,
@@ -163,6 +183,7 @@ func (h hookEngine) Recall(call hook.Call) (string, error) {
 		Limit:     5,
 		Scoring:   &scoring,
 		FTS:       fts,
+		Dense:     dense,
 		Indexed:   fts != nil,
 	})
 	if err != nil {

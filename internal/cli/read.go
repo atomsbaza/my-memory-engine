@@ -115,8 +115,17 @@ func cmdSearch(e *Env, c command, argv []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
+	// Dense seam: nil in off mode (byte-identical retrieval); a model
+	// mismatch between index and config is a loud failure, never stale.
+	dense, denseCloser, err := e.denseSeam(root, sch.Embedding.WithDefaults())
+	if err != nil {
+		closer()
+		return e.fail(err)
+	}
+	defer denseCloser()
 	scoring := sch.Scoring
 
+	bd := &domain.Breakdown{}
 	hits, err := domain.SelectFrom(recs, domain.SelectOptions{
 		Scope:             *scope,
 		Layers:            layers,
@@ -126,8 +135,11 @@ func cmdSearch(e *Env, c command, argv []string) int {
 		IncludeQuarantine: *all,
 		Scoring:           &scoring,
 		FTS:               fts,
+		Dense:             dense,
 		Indexed:           fts != nil,
+		Breakdown:         bd,
 	})
+
 	if err != nil {
 		return e.fail(err)
 	}
@@ -145,9 +157,13 @@ func cmdSearch(e *Env, c command, argv []string) int {
 		fmt.Fprintf(e.Stdout, "    %s\n", first)
 		if *scores {
 			// Additive score (title/tag/body overlap + confidence + recency +
-			// uses) — the RRF rank breakdown lives inside SelectFrom and is not
-			// exposed yet, so this is the number the ranking starts from.
-			fmt.Fprintf(e.Stdout, "    score=%.4f\n", domain.Score(r, query, *scope, scoring))
+			// uses); dense_rank appears only when the dense stream is wired
+			// (embedding mode on) — off-mode output stays byte-identical.
+			line := fmt.Sprintf("    score=%.4f", domain.Score(r, query, *scope, scoring))
+			if dense != nil {
+				line += fmt.Sprintf("  dense_rank=%d", bd.Ranks[r.ID].Dense)
+			}
+			fmt.Fprintln(e.Stdout, line)
 		}
 	}
 	return ExitOK

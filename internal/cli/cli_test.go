@@ -49,8 +49,8 @@ func TestManifestCounts(t *testing.T) {
 	if len(manifest) != CommandCount {
 		t.Fatalf("Manifest() = %d commands, want CommandCount %d", len(manifest), CommandCount)
 	}
-	if CommandCount != LegacyCommandCount+2 {
-		t.Fatalf("CommandCount = %d, want 18 legacy + init + doctor", CommandCount)
+	if CommandCount != LegacyCommandCount+3 {
+		t.Fatalf("CommandCount = %d, want 18 legacy + init + doctor + embed", CommandCount)
 	}
 	for i, name := range legacyNames {
 		if manifest[i].Name != name {
@@ -60,7 +60,7 @@ func TestManifestCounts(t *testing.T) {
 			t.Errorf("%s: Legacy = false, want true", name)
 		}
 	}
-	for _, extra := range []string{"init", "doctor"} {
+	for _, extra := range []string{"init", "doctor", "embed"} {
 		entry, ok := manifestEntry(extra)
 		if !ok {
 			t.Fatalf("manifest is missing %q", extra)
@@ -155,14 +155,14 @@ func TestHelpListsAllCommands(t *testing.T) {
 			t.Errorf("root help does not mention %q", name)
 		}
 	}
-	if !strings.Contains(out, "{context,search,list,show,add,touch,cite,review,supersede,verify,reindex,render,sync,import,hook,stats,eval,mcp,init,doctor}") {
+	if !strings.Contains(out, "{context,search,list,show,add,touch,cite,review,supersede,verify,reindex,render,sync,import,hook,stats,eval,mcp,init,doctor,embed}") {
 		t.Errorf("usage line does not list the full surface:\n%s", out)
 	}
 }
 
 func allNames() []string {
 	names := append([]string{}, legacyNames...)
-	return append(names, "init", "doctor")
+	return append(names, "init", "doctor", "embed")
 }
 
 // TestUnknownCommand: argparse parity — usage errors go to stderr, exit 2, and

@@ -45,13 +45,14 @@ const (
 const (
 	// LegacyCommandCount is the Python baseline's add_parser count.
 	LegacyCommandCount = 18
-	// CommandCount is the full surface: 18 legacy families + init + doctor.
-	CommandCount = LegacyCommandCount + 2
+	// CommandCount is the full surface: 18 legacy families + init + doctor
+	// + embed (the embedding-mode family is an engine-only additive surface).
+	CommandCount = LegacyCommandCount + 3
 )
 
 // usage is the top-level usage line; mirrors Python mem's argparse banner with
-// the two engine-only commands appended.
-const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,add,touch,cite,review,supersede,verify,reindex,render,sync,import,hook,stats,eval,mcp,init,doctor} ..."
+// the engine-only commands appended.
+const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,add,touch,cite,review,supersede,verify,reindex,render,sync,import,hook,stats,eval,mcp,init,doctor,embed} ..."
 
 // banner is the one-line description printed under usage.
 const banner = "portable agent memory (markdown + git)"
@@ -106,6 +107,7 @@ var commands = []command{
 	{Entry: Entry{Name: "mcp", Args: "[--agent A]", Help: "รันเป็น MCP server บน stdio (harness เรียกเป็น tool)", Legacy: true}, run: cmdMCP},
 	{Entry: Entry{Name: "init", Args: "[PATH]", Help: "สร้าง memory home ใหม่ (ไม่แตะ home เดิม)"}, run: cmdInit},
 	{Entry: Entry{Name: "doctor", Args: "", Help: "ตรวจความสอดคล้อง file ↔ index ↔ remote"}, run: cmdDoctor},
+	{Entry: Entry{Name: "embed", Args: "status | set <off|ollama> [--model M] [--base-url U]", Help: "ดู/ตั้ง embedding mode (off = default, ollama = semantic search ท้องถิ่น)"}, run: cmdEmbed},
 }
 
 // Manifest returns the command surface in registry order. Exported for the

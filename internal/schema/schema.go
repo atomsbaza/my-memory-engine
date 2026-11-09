@@ -18,6 +18,46 @@ import (
 	"strings"
 )
 
+// EmbeddingConfig is the optional "embedding" block of taxonomy.json:
+// {"provider":"off"|"ollama","model":"...","base_url":"..."}. It lives here —
+// not in internal/embed — so schema, store and index can parse and carry it
+// without gaining a network-client dependency (NFR-NET-01 guards).
+type EmbeddingConfig struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url"`
+}
+
+// Embedding defaults: off mode, nomic-embed-text, local Ollama.
+const (
+	EmbeddingProviderOff    = "off"
+	EmbeddingProviderOllama = "ollama"
+	EmbeddingDefaultModel   = "nomic-embed-text"
+	EmbeddingDefaultBaseURL = "http://127.0.0.1:11434"
+)
+
+// WithDefaults fills the documented defaults: provider off, model
+// nomic-embed-text, base URL http://127.0.0.1:11434.
+func (c EmbeddingConfig) WithDefaults() EmbeddingConfig {
+	out := c
+	if out.Provider == "" {
+		out.Provider = EmbeddingProviderOff
+	}
+	if out.Model == "" {
+		out.Model = EmbeddingDefaultModel
+	}
+	if out.BaseURL == "" {
+		out.BaseURL = EmbeddingDefaultBaseURL
+	}
+	return out
+}
+
+// Enabled reports whether the config selects a live provider (not off/empty).
+func (c EmbeddingConfig) Enabled() bool {
+	p := strings.TrimSpace(strings.ToLower(c.Provider))
+	return p != "" && p != EmbeddingProviderOff
+}
+
 // SchemaVersion is the record schema version this engine writes and supports.
 // A record carrying any other version is refused.
 const SchemaVersion = 1
@@ -55,6 +95,11 @@ type Schema struct {
 	SecretPatterns []string
 	ForbiddenPaths []string
 	Scoring        Scoring
+
+	// Embedding is the optional semantic-search block (off | ollama). The
+	// zero value means "block absent" which WithDefaults resolves to off —
+	// retrieval without it is byte-identical to the pre-embedding engine.
+	Embedding EmbeddingConfig
 
 	// Structural rules (defaults, overridable by record.schema.json).
 	Required           []string
@@ -135,6 +180,10 @@ type rawTaxonomy struct {
 	Tags           []string            `json:"tags"`
 	SecretPatterns []string            `json:"secret_patterns"`
 	ForbiddenPaths []string            `json:"forbidden_path_fragments"`
+
+	// Embedding is the optional semantic-search block; absent (nil) = off.
+	// Unknown keys inside the block are tolerated like every other block.
+	Embedding *EmbeddingConfig `json:"embedding,omitempty"`
 }
 
 type rawProperty struct {
@@ -215,6 +264,9 @@ func LoadSchema(root string) (Schema, error) {
 		}
 		if t.Scoring.WConf != 0 || t.Scoring.TauDays != 0 {
 			s.Scoring = t.Scoring
+		}
+		if t.Embedding != nil {
+			s.Embedding = t.Embedding.WithDefaults()
 		}
 		s.TaxonomyVersion = t.Version
 	} else if !os.IsNotExist(err) {
@@ -315,6 +367,7 @@ func buildDefault() Schema {
 		SecretPatterns:     append([]string(nil), defaultSecretPatterns...),
 		ForbiddenPaths:     append([]string(nil), defaultForbiddenPaths...),
 		Scoring:            defaultScoring,
+		Embedding:          EmbeddingConfig{}.WithDefaults(),
 		Required:           append([]string(nil), defaultRequired...),
 		ValidLayers:        stringSet(sortedMapKeys(defaultLayers)),
 		ValidStatuses:      stringSet(defaultStatuses),

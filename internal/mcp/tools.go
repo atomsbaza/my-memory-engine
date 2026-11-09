@@ -23,6 +23,7 @@ import (
 
 	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/domain"
+	"github.com/atomsbaza/my-memory-engine/internal/embed"
 	"github.com/atomsbaza/my-memory-engine/internal/index"
 	"github.com/atomsbaza/my-memory-engine/internal/schema"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
@@ -120,6 +121,53 @@ func (s *server) ftsSeam(rebuild bool) (func(query string, limit int) ([]string,
 		return nil, nil, fmt.Errorf("index %s: %w", path, err)
 	}
 	return ix.Search, func() { _ = ix.Close() }, nil
+}
+
+// denseSeam is the MCP mirror of the CLI dense seam: nil when embedding mode
+// is off or the index has no emb table; a model mismatch is an error the
+// tool must surface (stale dense ranks are forbidden).
+func (s *server) denseSeam(cfg embed.Config) (func(query string, limit int) ([]string, error), func(), error) {
+	provider := embed.NewFromConfig(cfg)
+	if provider == nil {
+		return nil, func() {}, nil
+	}
+	path := index.IndexPath(s.root)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, func() {}, nil
+		}
+		return nil, nil, err
+	}
+	ix, err := index.Open(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("index %s: %w", path, err)
+	}
+	model, dim, _, ok, err := ix.EmbMeta()
+	if err != nil {
+		ix.Close()
+		return nil, nil, err
+	}
+	if !ok {
+		_ = ix.Close()
+		return nil, func() {}, nil
+	}
+	if model != provider.Model() {
+		ix.Close()
+		return nil, nil, fmt.Errorf("embed: index สร้างด้วย model %q แต่ config ใช้ %q — รัน `mem reindex` ก่อน (ไม่งั้น dense ranks จะเก่า)", model, provider.Model())
+	}
+	search := func(query string, limit int) ([]string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), embed.RequestTimeout)
+		defer cancel()
+		vecs, err := provider.Embed(ctx, []string{query})
+		if err != nil {
+			return nil, err
+		}
+		if len(vecs) != 1 || len(vecs[0]) != dim {
+			return nil, fmt.Errorf("embed: query dim ไม่ตรง index dim %d — รัน `mem reindex`", dim)
+		}
+		return ix.DenseSearch(vecs[0], limit)
+	}
+	return search, func() { _ = ix.Close() }, nil
 }
 
 // budgets is the taxonomy budgets_chars map with the engine defaults filled in
@@ -259,6 +307,12 @@ func (s *server) handleSearch(_ context.Context, _ *mcpsdk.CallToolRequest, in S
 	if err != nil {
 		return result("", err.Error(), true)
 	}
+	dense, denseCloser, derr := s.denseSeam(sch.Embedding.WithDefaults())
+	if derr != nil {
+		closer()
+		return result("", derr.Error(), true)
+	}
+	defer denseCloser()
 	scoring := sch.Scoring
 
 	var layers []string
@@ -279,6 +333,7 @@ func (s *server) handleSearch(_ context.Context, _ *mcpsdk.CallToolRequest, in S
 		IncludeQuarantine: in.IncludeInactive,
 		Scoring:           &scoring,
 		FTS:               fts,
+		Dense:             dense,
 		Indexed:           fts != nil,
 		Breakdown:         bd,
 	})
@@ -299,8 +354,12 @@ func (s *server) handleSearch(_ context.Context, _ *mcpsdk.CallToolRequest, in S
 		fmt.Fprintf(&b, "    %s\n", first)
 		if in.Scores {
 			rk := bd.Ranks[r.ID]
-			fmt.Fprintf(&b, "    rrf_score=%.4f  fts_rank=%s  vec_rank=%s  score_rank=%s\n",
-				bd.RRF[r.ID], rankOr(rk.FTS), rankOr(rk.Vec), rankOr(rk.Scored))
+			line := fmt.Sprintf("    rrf_score=%.4f  fts_rank=%s  vec_rank=%s", bd.RRF[r.ID], rankOr(rk.FTS), rankOr(rk.Vec))
+			if dense != nil {
+				line += fmt.Sprintf("  dense_rank=%s", rankOr(rk.Dense))
+			}
+			line += fmt.Sprintf("  score_rank=%s\n", rankOr(rk.Scored))
+			b.WriteString(line)
 		}
 	}
 	return result(b.String(), "", false)
@@ -967,6 +1026,12 @@ func (s *server) handleTrace(_ context.Context, _ *mcpsdk.CallToolRequest, in Tr
 	if err != nil {
 		return result("", err.Error(), true)
 	}
+	dense, denseCloser, derr := s.denseSeam(sch.Embedding.WithDefaults())
+	if derr != nil {
+		closer()
+		return result("", derr.Error(), true)
+	}
+	defer denseCloser()
 	scoring := sch.Scoring
 
 	bd := &domain.Breakdown{}
@@ -976,6 +1041,7 @@ func (s *server) handleTrace(_ context.Context, _ *mcpsdk.CallToolRequest, in Tr
 		Limit:     limit,
 		Scoring:   &scoring,
 		FTS:       fts,
+		Dense:     dense,
 		Indexed:   fts != nil,
 		Breakdown: bd,
 	})
@@ -998,8 +1064,12 @@ func (s *server) handleTrace(_ context.Context, _ *mcpsdk.CallToolRequest, in Tr
 		sort.Strings(toks)
 		fmt.Fprintf(&b, "  tokens: %s\n", strings.Join(toks, " "))
 		rrf := domain.RRF()
-		fmt.Fprintf(&b, "  RRF: K=%d · w_fts=%s · w_vector=%s · w_scored=%s (each list top-50)\n",
-			int(rrf.K), pyFloat(rrf.WFTS), pyFloat(rrf.WVector), pyFloat(rrf.WScored))
+		weights := fmt.Sprintf("  RRF: K=%d · w_fts=%s · w_vector=%s", int(rrf.K), pyFloat(rrf.WFTS), pyFloat(rrf.WVector))
+		if dense != nil {
+			weights += fmt.Sprintf(" · w_dense=%s", pyFloat(rrf.WDense))
+		}
+		weights += fmt.Sprintf(" · w_scored=%s (each list top-50)\n", pyFloat(rrf.WScored))
+		b.WriteString(weights)
 	} else {
 		fmt.Fprintln(&b, "  tokens: (ว่าง — ไม่มี q_tokens, RRF ไม่ทำงาน เรียงด้วย score เพียว ๆ)")
 	}
@@ -1009,8 +1079,12 @@ func (s *server) handleTrace(_ context.Context, _ *mcpsdk.CallToolRequest, in Tr
 	for i, r := range hits {
 		rk := bd.Ranks[r.ID]
 		fmt.Fprintf(&b, "%2d. %s  [%s/%s]\n", i+1, r.ID, r.Layer, r.Scope)
-		fmt.Fprintf(&b, "      rrf_score=%.4f  fts_rank=%s  vec_rank=%s  score_rank=%s\n",
-			bd.RRF[r.ID], rankOr(rk.FTS), rankOr(rk.Vec), rankOr(rk.Scored))
+		ranks := fmt.Sprintf("      rrf_score=%.4f  fts_rank=%s  vec_rank=%s", bd.RRF[r.ID], rankOr(rk.FTS), rankOr(rk.Vec))
+		if dense != nil {
+			ranks += fmt.Sprintf("  dense_rank=%s", rankOr(rk.Dense))
+		}
+		ranks += fmt.Sprintf("  score_rank=%s\n", rankOr(rk.Scored))
+		b.WriteString(ranks)
 		fmt.Fprintf(&b, "      score=%.2f  decay=%.2f  half_life=%s  S=%.2f  uses=%d\n",
 			domain.Score(r, in.Query, in.Scope, scoring), r.Decay,
 			halfLifeLabel(domain.HalfLifeDays(r)), domain.RetentionScore(r), r.Uses)

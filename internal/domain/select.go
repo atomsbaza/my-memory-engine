@@ -14,13 +14,16 @@ import (
 	"github.com/atomsbaza/my-memory-engine/internal/store"
 )
 
-// RRF constants (Python RRF_K / RRF_W_*).
+// RRF constants (Python RRF_K / RRF_W_*). WDense fuses the optional dense
+// embedding stream (semantic-search mode); with embeddings off no dense list
+// exists and the fusion is byte-identical to the pre-embedding engine.
 const (
 	rrfK        = 60.0
 	rrfWFTS     = 1.0
 	rrfWVector  = 1.2
+	rrfWDense   = 1.2
 	rrfWScored  = 6.0
-	selectLimit = 50 // fts/vec rank list length inside selection
+	selectLimit = 50 // fts/vec/dense rank list length inside selection
 )
 
 // SelectOptions mirrors Python select_from parameters. Zero values follow
@@ -48,6 +51,15 @@ type SelectOptions struct {
 	FTSIDs []string
 	VecIDs []string
 
+	// Dense provides semantic ranks over the index's emb table (cosine of
+	// the query embedding against stored chunk vectors, max per record).
+	// nil → no dense stream (embedding mode off): the RRF fusion then runs
+	// exactly the three-list pre-embedding shape. DenseIDs is the
+	// precomputed variant (PickForQuery embeds the query once and reuses
+	// the list across layers).
+	Dense    func(query string, limit int) ([]string, error)
+	DenseIDs []string
+
 	// Indexed reports that the derived index exists, so the lexical vector
 	// rank list can be built. Python's vector_ids reads the index's vec/df
 	// tables, so those ranks exist only when the index does: on a home that
@@ -68,19 +80,22 @@ type RRFParams struct {
 	K       float64
 	WFTS    float64
 	WVector float64
+	WDense  float64
 	WScored float64
 }
 
 // RRF returns the fusion constants of the RRF step.
 func RRF() RRFParams {
-	return RRFParams{K: rrfK, WFTS: rrfWFTS, WVector: rrfWVector, WScored: rrfWScored}
+	return RRFParams{K: rrfK, WFTS: rrfWFTS, WVector: rrfWVector, WDense: rrfWDense, WScored: rrfWScored}
 }
 
 // RankInfo is a record's 1-based rank in each fused list; 0 means the record
-// is absent from that list (Python's missing ranks key).
+// is absent from that list (Python's missing ranks key). Dense stays 0 while
+// embedding mode is off.
 type RankInfo struct {
 	FTS    int
 	Vec    int
+	Dense  int
 	Scored int
 }
 
@@ -92,7 +107,7 @@ type Breakdown struct {
 }
 
 // fill writes the fusion result into b (Python rrf_breakdown's ranks dict).
-func (b *Breakdown) fill(fts, vec, scored []string, rrf map[string]float64) {
+func (b *Breakdown) fill(fts, vec, dense, scored []string, rrf map[string]float64) {
 	b.RRF = rrf
 	b.Ranks = make(map[string]RankInfo, len(fts)+len(vec))
 	for i, id := range fts {
@@ -103,6 +118,11 @@ func (b *Breakdown) fill(fts, vec, scored []string, rrf map[string]float64) {
 	for i, id := range vec {
 		r := b.Ranks[id]
 		r.Vec = i + 1
+		b.Ranks[id] = r
+	}
+	for i, id := range dense {
+		r := b.Ranks[id]
+		r.Dense = i + 1
 		b.Ranks[id] = r
 	}
 	for i, id := range scored {
@@ -195,7 +215,7 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 	}
 
 	qTokens := Tokens(o.Query)
-	var fts50, vec50 []string
+	var fts50, vec50, dense50 []string
 	if len(qTokens) > 0 {
 		var err error
 		switch {
@@ -210,6 +230,14 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 			vec50 = o.VecIDs
 		} else if o.Indexed {
 			vec50 = vectorIDs(allRecs, o.Query, selectLimit)
+		}
+		switch {
+		case o.DenseIDs != nil:
+			dense50 = o.DenseIDs
+		case o.Dense != nil:
+			if dense50, err = o.Dense(o.Query, selectLimit); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -276,9 +304,9 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 			}
 			scoredIDs = append(scoredIDs, r.ID)
 		}
-		rrf := rrfBreakdown(fts50, vec50, scoredIDs)
+		rrf := rrfBreakdown(fts50, vec50, dense50, scoredIDs)
 		if o.Breakdown != nil {
-			o.Breakdown.fill(fts50, vec50, scoredIDs, rrf)
+			o.Breakdown.fill(fts50, vec50, dense50, scoredIDs, rrf)
 		}
 		sort.SliceStable(hits, func(i, j int) bool {
 			ri, rj := rrf[hits[i].ID], rrf[hits[j].ID]
@@ -303,9 +331,11 @@ func clipList(ids []string, n int) []string {
 	return ids
 }
 
-// rrfBreakdown fuses the three rank lists (Python rrf_breakdown): FTS,
-// vector and scored, each 1-based, weight / (K + rank).
-func rrfBreakdown(fts, vec, scored []string) map[string]float64 {
+// rrfBreakdown fuses the rank lists (Python rrf_breakdown): FTS, lexical
+// vector, dense (semantic) and scored, each 1-based, weight / (K + rank).
+// A nil/empty dense list contributes nothing — off mode keeps the exact
+// three-list arithmetic of the pre-embedding engine.
+func rrfBreakdown(fts, vec, dense, scored []string) map[string]float64 {
 	rrf := map[string]float64{}
 	add := func(ids []string, weight float64) {
 		for i, id := range ids {
@@ -314,6 +344,7 @@ func rrfBreakdown(fts, vec, scored []string) map[string]float64 {
 	}
 	add(fts, rrfWFTS)
 	add(vec, rrfWVector)
+	add(dense, rrfWDense)
 	add(scored, rrfWScored)
 	return rrf
 }
@@ -442,6 +473,13 @@ func splitSentences(para string) []string {
 	return out
 }
 
+// ChunkText is the exported chunking used by both the lexical vector ranks
+// and the embedding index build (semantic mode chunks with the exact same
+// paragraph/sentence/400-rune boundaries, so the two streams stay comparable).
+func ChunkText(text string, maxChars int) []string {
+	return chunkText(text, maxChars)
+}
+
 func chunkText(text string, maxChars int) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -521,6 +559,10 @@ type RetrievalOptions struct {
 	Limit     int
 	Scoring   *schema.Scoring
 	FTS       func(query string, limit int) ([]string, error)
+	// Dense provides semantic ranks (embedding mode on); nil = off. The
+	// query is embedded once here and the rank list reused across the
+	// lesson/decision/handoff selections.
+	Dense func(query string, limit int) ([]string, error)
 	// Indexed reports that the derived index exists. Python pick_for_query
 	// reads fts_ids and vector_ids from that index, so without it there are
 	// neither FTS nor vector ranks — only the score list feeds the fusion.
@@ -554,18 +596,25 @@ func PickForQuery(recs []store.Record, o RetrievalOptions) ([]ScoredRecord, erro
 	if len(qTokens) > 0 && o.Indexed {
 		vec50 = vectorIDs(recs, o.Query, selectLimit)
 	}
+	var dense50 []string
+	if len(qTokens) > 0 && o.Dense != nil {
+		if dense50, err = o.Dense(o.Query, selectLimit); err != nil {
+			return nil, err
+		}
+	}
 
 	var hits []ScoredRecord
 	for _, layer := range []string{"lesson", "decision", "handoff"} {
 		sel, serr := SelectFrom(recs, SelectOptions{
-			Scope:   o.Scope,
-			Layers:  []string{layer},
-			Query:   o.Query,
-			Limit:   o.Limit,
-			Scoring: &w,
-			FTSIDs:  fts50,
-			VecIDs:  vec50,
-			Indexed: o.Indexed,
+			Scope:    o.Scope,
+			Layers:   []string{layer},
+			Query:    o.Query,
+			Limit:    o.Limit,
+			Scoring:  &w,
+			FTSIDs:   fts50,
+			VecIDs:   vec50,
+			DenseIDs: dense50,
+			Indexed:  o.Indexed,
 		})
 		if serr != nil {
 			return nil, serr

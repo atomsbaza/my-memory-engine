@@ -162,7 +162,7 @@ func TestSelectQueryThresholdGate(t *testing.T) {
 
 func TestSelectFallbacks(t *testing.T) {
 	pinClock(t, "2026-11-08T10:00:00")
-	quiet := mrec("lesson.f1", "lesson", "silent", "unrelated words", "global", nil)   // 3.9
+	quiet := mrec("lesson.f1", "lesson", "silent", "unrelated words", "global", nil) // 3.9
 	scoped := mrec("lesson.f2", "lesson", "scoped quiet", "other words", "project:Beta", nil)
 	recs := []store.Record{quiet, scoped}
 
@@ -186,7 +186,7 @@ func TestSelectFallbacks(t *testing.T) {
 
 func TestSelectRRFReorders(t *testing.T) {
 	pinClock(t, "2026-11-08T10:00:00")
-	strong := mrec("lesson.r1", "lesson", "zebra title", "plain body", "global", nil)        // scored rank 1
+	strong := mrec("lesson.r1", "lesson", "zebra title", "plain body", "global", nil)                  // scored rank 1
 	lexical := mrec("lesson.r2", "lesson", "other title", "zebra appears in body only", "global", nil) // fts rank 1
 
 	// Score ranking control: the title hit outweighs the body hit; with
@@ -227,10 +227,78 @@ func TestSelectRRFReorders(t *testing.T) {
 	}
 
 	// Fusion arithmetic probe: the exact RRF sums.
-	rrf := rrfBreakdown([]string{"lesson.r2"}, nil, []string{"lesson.r1", "lesson.r2"})
+	rrf := rrfBreakdown([]string{"lesson.r2"}, nil, nil, []string{"lesson.r1", "lesson.r2"})
 	if !floatEq(rrf["lesson.r2"], 1.0/(60+1)+6.0/(60+2)) ||
 		!floatEq(rrf["lesson.r1"], 6.0/(60+1)) {
 		t.Fatalf("rrf breakdown = %v", rrf)
+	}
+
+	// Off-mode identity: a nil dense list contributes exactly zero — the
+	// sums above are the pre-embedding arithmetic unchanged.
+	rrfNil := rrfBreakdown([]string{"lesson.r2"}, nil, nil, []string{"lesson.r1", "lesson.r2"})
+	if !floatEq(rrfNil["lesson.r2"], rrf["lesson.r2"]) || !floatEq(rrfNil["lesson.r1"], rrf["lesson.r1"]) {
+		t.Fatalf("nil dense changed the fusion: %v vs %v", rrfNil, rrf)
+	}
+
+	// Dense stream arithmetic: a dense-only rank 1 for r1 lifts it over r2
+	// (r1 = 1.2/61 + 6/62 > r2 = 1/61 + 6/61 — scored rank 2 vs 1).
+	rrfD := rrfBreakdown([]string{"lesson.r2"}, nil, []string{"lesson.r1"}, []string{"lesson.r2", "lesson.r1"})
+	if !floatEq(rrfD["lesson.r1"], 1.2/(60+1)+6.0/(60+2)) ||
+		!floatEq(rrfD["lesson.r2"], 1.0/(60+1)+6.0/(60+1)) ||
+		!(rrfD["lesson.r1"] > rrfD["lesson.r2"]) {
+		t.Fatalf("dense rrf breakdown = %v", rrfD)
+	}
+}
+
+// TestSelectDenseStreamReorders: the 4th RRF list (semantic ranks) changes
+// the fused order exactly as its weight dictates, and RankInfo carries the
+// dense rank for debug surfaces only when the stream is wired.
+func TestSelectDenseStreamReorders(t *testing.T) {
+	pinClock(t, "2026-11-08T10:00:00")
+	strong := mrec("lesson.r1", "lesson", "zebra title", "plain body", "global", nil)
+	lexical := mrec("lesson.r2", "lesson", "other title", "zebra appears in body only", "global", nil)
+
+	// Dense naming only the strong record flips the fused order that the
+	// lexical fusion alone produced (r2 first, see TestSelectRRFReorders).
+	ids := SelectFrom2(t, []store.Record{strong, lexical},
+		SelectOptions{Query: "zebra", Limit: 10, Indexed: true, DenseIDs: []string{"lesson.r1"}})
+	if ids[0] != "lesson.r1" {
+		t.Fatalf("dense fusion order = %v, want lesson.r1 first", ids)
+	}
+
+	// RankInfo: dense rank recorded when wired, zero when the stream is off.
+	bd := &Breakdown{}
+	SelectFrom2(t, []store.Record{strong, lexical}, SelectOptions{
+		Query: "zebra", Limit: 10, Indexed: true, DenseIDs: []string{"lesson.r1"}, Breakdown: bd})
+	if bd.Ranks["lesson.r1"].Dense != 1 || bd.Ranks["lesson.r2"].Dense != 0 {
+		t.Fatalf("dense ranks = %v", bd.Ranks)
+	}
+	bdOff := &Breakdown{}
+	SelectFrom2(t, []store.Record{strong, lexical}, SelectOptions{
+		Query: "zebra", Limit: 10, Indexed: true, Breakdown: bdOff})
+	if bdOff.Ranks["lesson.r1"].Dense != 0 || bdOff.Ranks["lesson.r2"].Dense != 0 {
+		t.Fatalf("off-mode dense ranks must stay 0: %v", bdOff.Ranks)
+	}
+
+	// The Dense seam function (search path) is consulted once and its list
+	// used verbatim.
+	calls := 0
+	ids = SelectFrom2(t, []store.Record{strong, lexical}, SelectOptions{
+		Query: "zebra", Limit: 10, Indexed: true,
+		Dense: func(q string, limit int) ([]string, error) {
+			calls++
+			if limit != 50 {
+				t.Fatalf("dense limit = %d, want 50", limit)
+			}
+			return []string{"lesson.r1"}, nil
+		}})
+	if calls != 1 || ids[0] != "lesson.r1" {
+		t.Fatalf("dense seam: %d calls, order %v", calls, ids)
+	}
+
+	// WDense is frozen at 1.2 alongside the other fusion constants.
+	if RRF().WDense != 1.2 {
+		t.Fatalf("WDense = %v, want 1.2", RRF().WDense)
 	}
 }
 

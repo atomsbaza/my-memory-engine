@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
+	"github.com/atomsbaza/my-memory-engine/internal/vec"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver (cgo-free, FTS5 built in)
 )
@@ -195,7 +197,12 @@ var createFTS = func(tx *sql.Tx) error {
 	return err
 }
 
-// Rebuild replaces the entire index from records in one transaction:
+// embMetaKeys are the meta stamps that describe the emb table. Rebuild
+// carries them across (the emb table itself survives an automatic rebuild —
+// only `mem reindex` and DropEmb invalidate embeddings deliberately).
+var embMetaKeys = [3]string{"embed_model", "embed_dim", "embed_count"}
+
+// Rebuild replaces the lexical index from records in one transaction:
 // drop + create the rec/fts/meta tables, insert every record, stamp
 // schema_version. It is idempotent — rebuilding over an existing index
 // (stale, corrupt-schema, or current) yields the same content — and it
@@ -203,7 +210,13 @@ var createFTS = func(tx *sql.Tx) error {
 // unavailable the rec table and stamps are still written and Search falls
 // back to substring matching; the degraded mode is observable via FTS5()
 // and the fts5 meta row, never silent.
+//
+// The emb table and its meta stamps are deliberately preserved: automatic
+// rebuilds (the stop hook) must not silently discard the embedding index,
+// which only a mode-aware `mem reindex` rebuilds. `mem reindex` in off mode
+// calls DropEmb so an off-mode index is provably emb-free.
 func (ix *Index) Rebuild(records []store.Record) error {
+	embStamps := ix.readEmbStamps()
 	tx, err := ix.db.Begin()
 	if err != nil {
 		return fmt.Errorf("index: rebuild %s: begin: %w", ix.path, err)
@@ -222,6 +235,7 @@ func (ix *Index) Rebuild(records []store.Record) error {
 			return fmt.Errorf("index: rebuild %s: %q: %w", ix.path, stmt, err)
 		}
 	}
+	_ = embStamps
 
 	fts := true
 	if err := createFTS(tx); err != nil {
@@ -266,6 +280,7 @@ func (ix *Index) Rebuild(records []store.Record) error {
 	if !fts {
 		stamps[2] = [2]string{"fts5", "0"}
 	}
+	stamps = append(stamps, embStamps...)
 	for _, kv := range stamps {
 		if _, err := tx.Exec(`INSERT INTO meta VALUES (?,?)`, kv[0], kv[1]); err != nil {
 			return fmt.Errorf("index: rebuild %s: stamp %s: %w", ix.path, kv[0], err)
@@ -277,6 +292,183 @@ func (ix *Index) Rebuild(records []store.Record) error {
 	}
 	ix.fts = fts
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Embeddings — the optional emb table (semantic-search mode)
+// ---------------------------------------------------------------------------
+
+// EmbRow is one stored chunk vector: the chunk_idx-th chunk of record id.
+type EmbRow struct {
+	ID       string
+	ChunkIdx int
+	Vec      []byte // embed.EncodeVec output (little-endian float32)
+}
+
+// readEmbStamps returns the embed_* meta rows so Rebuild can carry them
+// across a lexical rebuild (the emb table itself is not dropped).
+func (ix *Index) readEmbStamps() [][2]string {
+	var have int
+	if err := ix.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&have); err != nil || have == 0 {
+		return nil
+	}
+	var out [][2]string
+	for _, k := range embMetaKeys {
+		var v string
+		err := ix.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, k).Scan(&v)
+		if err != nil {
+			continue // absent stamp: nothing to carry
+		}
+		out = append(out, [2]string{k, v})
+	}
+	return out
+}
+
+// SetEmb replaces the emb table with rows in one transaction and stamps
+// embed_model/embed_dim/embed_count. Every row's vector must share one
+// dimension — a ragged set is refused before any write.
+func (ix *Index) SetEmb(rows []EmbRow, model string, dim int) error {
+	if dim <= 0 {
+		return fmt.Errorf("index: set emb %s: dim %d ไม่ถูกต้อง", ix.path, dim)
+	}
+	for i, r := range rows {
+		if len(r.Vec) != 4*dim {
+			return fmt.Errorf("index: set emb %s: row %d (%s#%d) ยาว %d bytes ไม่ตรง dim %d", ix.path, i, r.ID, r.ChunkIdx, len(r.Vec), dim)
+		}
+	}
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return fmt.Errorf("index: set emb %s: begin: %w", ix.path, err)
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{`DROP TABLE IF EXISTS emb`, `CREATE TABLE emb (id TEXT, chunk_idx INTEGER, vec BLOB)`} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("index: set emb %s: %q: %w", ix.path, stmt, err)
+		}
+	}
+	ins, err := tx.Prepare(`INSERT INTO emb VALUES (?,?,?)`)
+	if err != nil {
+		return fmt.Errorf("index: set emb %s: prepare: %w", ix.path, err)
+	}
+	defer ins.Close()
+	for _, r := range rows {
+		if _, err := ins.Exec(r.ID, r.ChunkIdx, r.Vec); err != nil {
+			return fmt.Errorf("index: set emb %s: insert %s#%d: %w", ix.path, r.ID, r.ChunkIdx, err)
+		}
+	}
+	for _, kv := range [][2]string{
+		{"embed_model", model},
+		{"embed_dim", strconv.Itoa(dim)},
+		{"embed_count", strconv.Itoa(len(rows))},
+	} {
+		if _, err := tx.Exec(`INSERT INTO meta VALUES (?,?)`, kv[0], kv[1]); err != nil {
+			return fmt.Errorf("index: set emb %s: stamp %s: %w", ix.path, kv[0], err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("index: set emb %s: commit: %w", ix.path, err)
+	}
+	return nil
+}
+
+// DropEmb removes the emb table and its meta stamps — the provable off-mode
+// state: an off-mode index carries no embedding bytes at all.
+func (ix *Index) DropEmb() error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return fmt.Errorf("index: drop emb %s: begin: %w", ix.path, err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS emb`); err != nil {
+		return fmt.Errorf("index: drop emb %s: %w", ix.path, err)
+	}
+	for _, k := range embMetaKeys {
+		if _, err := tx.Exec(`DELETE FROM meta WHERE key = ?`, k); err != nil {
+			return fmt.Errorf("index: drop emb %s: clear %s: %w", ix.path, k, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("index: drop emb %s: commit: %w", ix.path, err)
+	}
+	return nil
+}
+
+// EmbMeta returns the embedding stamps: the model, vector dimension and
+// stored-chunk count. ok is false when no emb table exists (off mode, or
+// embeddings never built).
+func (ix *Index) EmbMeta() (model string, dim, count int, ok bool, err error) {
+	var have int
+	if err = ix.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'emb'`).Scan(&have); err != nil {
+		return "", 0, 0, false, fmt.Errorf("index: read emb meta %s: %w", ix.path, err)
+	}
+	if have == 0 {
+		return "", 0, 0, false, nil
+	}
+	var m, d, c string
+	if err = ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'embed_model'`).Scan(&m); err != nil {
+		return "", 0, 0, false, fmt.Errorf("index: read embed_model %s: %w", ix.path, err)
+	}
+	if err = ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'embed_dim'`).Scan(&d); err != nil {
+		return "", 0, 0, false, fmt.Errorf("index: read embed_dim %s: %w", ix.path, err)
+	}
+	if err = ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'embed_count'`).Scan(&c); err != nil {
+		return "", 0, 0, false, fmt.Errorf("index: read embed_count %s: %w", ix.path, err)
+	}
+	dim, derr := strconv.Atoi(d)
+	if derr != nil {
+		return "", 0, 0, false, fmt.Errorf("index: embed_dim %q: %w", ix.path, derr)
+	}
+	count, cerr := strconv.Atoi(c)
+	if cerr != nil {
+		return "", 0, 0, false, fmt.Errorf("index: embed_count %q: %w", ix.path, cerr)
+	}
+	return m, dim, count, true, nil
+}
+
+// DenseSearch ranks record ids by the best cosine similarity between qvec and
+// any stored chunk of that record ("max per record"), most similar first, at
+// most limit ids. A dimension mismatch between qvec and a stored row is an
+// observable error, never a silently wrong similarity.
+func (ix *Index) DenseSearch(qvec []float32, limit int) ([]string, error) {
+	rows, err := ix.db.Query(`SELECT id, vec FROM emb`)
+	if err != nil {
+		return nil, fmt.Errorf("index: dense search %s: %w", ix.path, err)
+	}
+	defer rows.Close()
+	best := map[string]float64{}
+	var order []string
+	for rows.Next() {
+		var id string
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
+			return nil, fmt.Errorf("index: dense search %s: %w", ix.path, err)
+		}
+		stored, derr := vec.Decode(blob)
+		if derr != nil {
+			return nil, fmt.Errorf("index: dense search %s: %w", ix.path, derr)
+		}
+		sim, cerr := vec.Cosine(qvec, stored)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if _, seen := best[id]; !seen {
+			// Mark the key even when the first chunk scores 0 so later
+			// chunks of the same record cannot re-append the id.
+			best[id] = math.Inf(-1)
+			order = append(order, id)
+		}
+		if sim > best[id] {
+			best[id] = sim
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("index: dense search %s: %w", ix.path, err)
+	}
+	sort.SliceStable(order, func(i, j int) bool { return best[order[i]] > best[order[j]] })
+	if limit >= 0 && len(order) > limit {
+		order = order[:limit]
+	}
+	return order, nil
 }
 
 // ---------------------------------------------------------------------------
