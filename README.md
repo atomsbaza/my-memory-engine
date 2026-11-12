@@ -84,8 +84,8 @@ All three are read-only with `--dry-run` (exit 0) and re-index after a real writ
 - `mem promote --scan [--notify]` — the mechanical half of promotion: groups active lessons by
   primary tag (cross-referencing `ops/failures/*.md`, no LLM) into `ops/promotions-candidates.md`,
   rewriting the file **only when the content changed** (the timestamp header is excluded from the
-  digest). `--notify` posts a macOS notification only on a real change — this is what the
-  `com.pisit.mem-promote` LaunchAgent cron runs. Judgment and approval stay in the
+  digest). `--notify` posts a macOS notification only on a real change — this is what a
+  LaunchAgent cron (`com.<owner>.mem-promote`) runs once installed. Judgment and approval stay in the
   `/promote-lessons` skill; the scan never applies anything.
 - `mem compact [--days N] [--min-group N] [--dry-run]` — folds handoffs older than `--days`
   (default 7, by `last_used` else `created`) into one `knowledge` record per scope once a scope
