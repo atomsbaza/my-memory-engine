@@ -1,6 +1,6 @@
 # mem command surface
 
-24 commands: 21 legacy Python families + `init` + `doctor` + `embed`.
+25 commands: 21 legacy Python families + `init` + `doctor` + `embed` + `links`.
 
 Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 
@@ -10,6 +10,7 @@ Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 | `search` | `<query> [--scope S] [--layer L]... [--limit N] [--all] [--scores]` | ค้น record | legacy |
 | `list` | `[--layer L] [--scope S] [--limit N] [--all] [--status ST]` | ไล่รายการ record | legacy |
 | `show` | `[<id>] [--path P]` | เปิด record เต็ม | legacy |
+| `links` | `<id> [--depth N] [--related] [--json]` | ดูว่า record เชื่อมกับตัวอื่นอย่างไร (supersede chain, evidence, body refs, dangling) | engine |
 | `add` | `--layer L --scope S --file F [flags]` | เพิ่ม record ใหม่ | legacy |
 | `touch` | `<id>` | อัปเดต last_used | legacy |
 | `cite` | `<id>` | นับว่า record ถูกใช้จริง (uses +1) | legacy |

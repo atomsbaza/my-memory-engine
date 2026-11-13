@@ -56,6 +56,7 @@ export MEM_HOME=~/my-memory
 
 mem context                         # rules + scoped records + knowledge pointers (budgeted)
 mem search "fts5 ranking" --limit 5
+mem links lesson.1a2b0001          # how a record links to others (supersede chain, evidence, body refs)
 mem trace "security guard"          # RRF breakdown + layer allocation
 mem add --layer lesson --scope global --file - --title "..." < note.md
 mem verify                          # schema/secret/path/dup/index audit
