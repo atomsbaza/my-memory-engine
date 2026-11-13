@@ -616,6 +616,215 @@ func TestMalformedInput(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Resources + Prompts (KB-patterns P0) — wire-level additive contract
+// ---------------------------------------------------------------------------
+
+// TestCapabilitiesAdvertiseResourcesAndPrompts: the initialize result
+// advertises resources and prompts beside the unchanged tools capability.
+func TestCapabilitiesAdvertiseResourcesAndPrompts(t *testing.T) {
+	home := fixtureHome(t)
+	s := runMCP(t, home, initialize()...)
+	var initRes struct {
+		Capabilities struct {
+			Tools     map[string]any `json:"tools"`
+			Resources map[string]any `json:"resources"`
+			Prompts   map[string]any `json:"prompts"`
+		} `json:"capabilities"`
+	}
+	s.result(t, 1, &initRes)
+	if initRes.Capabilities.Tools == nil {
+		t.Error("tools capability missing — the 13-tool surface must stay advertised")
+	}
+	if initRes.Capabilities.Resources == nil {
+		t.Error("capabilities do not advertise resources")
+	}
+	if initRes.Capabilities.Prompts == nil {
+		t.Error("capabilities do not advertise prompts")
+	}
+}
+
+// TestResourcesContract: the 2 static resources + 2 templates list over the
+// wire; rules read as markdown; a record prefix resolves; an unknown id is a
+// JSON-RPC error; the context template serves a provenance-headed pack; and
+// every stdout byte stays a JSON-RPC frame.
+func TestResourcesContract(t *testing.T) {
+	home := fixtureHome(t)
+	s := runMCP(t, home, append(initialize(),
+		request(2, "resources/list", nil),
+		request(3, "resources/templates/list", nil),
+		request(4, "resources/read", map[string]any{"uri": "memory://rules"}),
+		request(5, "resources/read", map[string]any{"uri": "memory://record/rule.aaaa00"}),
+		request(6, "resources/read", map[string]any{"uri": "memory://record/rule.deadbeef"}),
+		request(7, "resources/read", map[string]any{"uri": "memory://context?q=alpha%20bravo%20charlie&scope=global&budget=20000"}),
+	)...)
+	if s.code != 0 {
+		t.Fatalf("mem mcp exited %d\nstderr:\n%s", s.code, s.stderr)
+	}
+
+	var resList struct {
+		Resources []struct {
+			URI string `json:"uri"`
+		} `json:"resources"`
+	}
+	s.result(t, 2, &resList)
+	uris := map[string]bool{}
+	for _, r := range resList.Resources {
+		uris[r.URI] = true
+	}
+	if len(resList.Resources) != 2 || !uris["memory://rules"] || !uris["memory://stats"] {
+		t.Fatalf("resources/list = %v, want memory://rules + memory://stats", uris)
+	}
+
+	var tmplList struct {
+		ResourceTemplates []struct {
+			URITemplate string `json:"uriTemplate"`
+		} `json:"resourceTemplates"`
+	}
+	s.result(t, 3, &tmplList)
+	tmpls := map[string]bool{}
+	for _, rt := range tmplList.ResourceTemplates {
+		tmpls[rt.URITemplate] = true
+	}
+	if len(tmplList.ResourceTemplates) != 2 || !tmpls["memory://record/{id}"] ||
+		!tmpls["memory://context{?q,scope,budget}"] {
+		t.Fatalf("resources/templates/list = %v, want record + context templates", tmpls)
+	}
+
+	var readRes struct {
+		Contents []struct {
+			URI      string `json:"uri"`
+			MIMEType string `json:"mimeType"`
+			Text     string `json:"text"`
+		} `json:"contents"`
+	}
+	s.result(t, 4, &readRes)
+	if len(readRes.Contents) != 1 || readRes.Contents[0].MIMEType != "text/markdown" {
+		t.Fatalf("rules contents = %+v", readRes.Contents)
+	}
+	for _, id := range []string{"rule.aaaa0001", "rule.aaaa0002"} {
+		if !strings.Contains(readRes.Contents[0].Text, id) {
+			t.Errorf("rules markdown missing %s:\n%s", id, readRes.Contents[0].Text)
+		}
+	}
+
+	s.result(t, 5, &readRes)
+	if len(readRes.Contents) != 1 || !strings.Contains(readRes.Contents[0].Text, "id: rule.aaaa0001") {
+		t.Fatalf("record prefix read = %+v", readRes.Contents)
+	}
+
+	// Unknown record id: a JSON-RPC error frame naming the record.
+	f := s.response(t, 6)
+	if len(f.Error) == 0 || string(f.Error) == "null" {
+		t.Fatalf("unknown record id must be a JSON-RPC error, got result %s", f.Result)
+	}
+	if !strings.Contains(string(f.Error), "ไม่พบ record") && !strings.Contains(string(f.Error), "record") {
+		t.Errorf("error frame does not name the record: %s", f.Error)
+	}
+
+	s.result(t, 7, &readRes)
+	ctxText := readRes.Contents[0].Text
+	if !strings.Contains(ctxText, "provenance: ") || !strings.Contains(ctxText, "lesson.bbbb0001") {
+		t.Errorf("context resource missing provenance/surfaced id:\n%s", ctxText)
+	}
+	if !strings.HasPrefix(ctxText, "# memory context — scope global · budget 20000") {
+		t.Errorf("context header wrong:\n%s", strings.SplitN(ctxText, "\n", 2)[0])
+	}
+
+	// Stdout purity holds with the new surfaces: nothing outside the frames.
+	if len(s.extra) > 0 {
+		t.Errorf("stdout noise after the last frame:\n%s", strings.Join(s.extra, "\n"))
+	}
+}
+
+// TestPromptsContract: prompts/list serves memory_bootstrap; prompts/get
+// renders one user message with the pack, the instruction and the ids.
+func TestPromptsContract(t *testing.T) {
+	home := fixtureHome(t)
+	s := runMCP(t, home, append(initialize(),
+		request(2, "prompts/list", nil),
+		request(3, "prompts/get", map[string]any{
+			"name":      "memory_bootstrap",
+			"arguments": map[string]string{"scope": "global", "query": "alpha bravo charlie"},
+		}),
+	)...)
+	if s.code != 0 {
+		t.Fatalf("mem mcp exited %d\nstderr:\n%s", s.code, s.stderr)
+	}
+
+	var pList struct {
+		Prompts []struct {
+			Name string `json:"name"`
+		} `json:"prompts"`
+	}
+	s.result(t, 2, &pList)
+	found := false
+	for _, p := range pList.Prompts {
+		if p.Name == "memory_bootstrap" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("prompts/list = %+v, want memory_bootstrap", pList.Prompts)
+	}
+
+	var pGet struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	s.result(t, 3, &pGet)
+	if len(pGet.Messages) != 1 || pGet.Messages[0].Role != "user" || pGet.Messages[0].Content.Type != "text" {
+		t.Fatalf("prompt messages = %+v, want one user text message", pGet.Messages)
+	}
+	text := pGet.Messages[0].Content.Text
+	if !strings.Contains(text, "authoritative") || !strings.Contains(text, "lesson.bbbb0001") {
+		t.Errorf("prompt message missing the instruction or the citation ids:\n%s", text)
+	}
+	if len(s.extra) > 0 {
+		t.Errorf("stdout noise after the last frame:\n%s", strings.Join(s.extra, "\n"))
+	}
+}
+
+// TestAddGuardrailsOverMCP: memory_add inherits the domain atomicity guard —
+// a >8000-char body is an error result naming the cap, and a tagless
+// knowledge add is refused.
+func TestAddGuardrailsOverMCP(t *testing.T) {
+	home := fixtureHome(t)
+
+	res := callTool(t, home, "memory_add", map[string]any{
+		"text": strings.Repeat("mcp atomicity refuse filler ", 340), "layer": "lesson", "scope": "global",
+	})
+	if !res.IsError {
+		t.Fatalf("over-cap add was accepted: %q", res.text())
+	}
+	if !strings.Contains(res.text(), "8000") || !strings.Contains(res.text(), "pointer") {
+		t.Fatalf("refusal must name the cap and the pointer pattern: %q", res.text())
+	}
+
+	res = callTool(t, home, "memory_add", map[string]any{
+		"text": "pointer to the long-form note in the docs tree", "layer": "knowledge", "scope": "global",
+	})
+	if !res.IsError {
+		t.Fatalf("tagless knowledge add was accepted: %q", res.text())
+	}
+	if !strings.Contains(res.text(), "--tag") {
+		t.Fatalf("knowledge refusal must ask for a tag: %q", res.text())
+	}
+
+	// Warn band over MCP: the record lands and the warning rides the result.
+	res = callTool(t, home, "memory_add", map[string]any{
+		"text": strings.Repeat("mcp atomicity warn filler ", 70), "layer": "lesson", "scope": "global",
+	})
+	if res.IsError {
+		t.Fatalf("warn-band add errored: %q", res.text())
+	}
+}
+
 // sameJSON compares two JSON documents semantically.
 func sameJSON(t *testing.T, a, b []byte) bool {
 	t.Helper()

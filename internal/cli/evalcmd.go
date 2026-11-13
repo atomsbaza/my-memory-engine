@@ -84,8 +84,15 @@ func cmdEval(e *Env, c command, argv []string) int {
 	if metrics.Stale > 0 {
 		header += fmt.Sprintf(" (ข้าม stale %d)", metrics.Stale)
 	}
+	if metrics.AbstentionTotal > 0 {
+		header += fmt.Sprintf(" · abstention %d", metrics.AbstentionTotal)
+	}
 	fmt.Fprintf(e.Stdout, "%s · window %dd\n", header, *days)
 	fmt.Fprintf(e.Stdout, "recall@5 = %v\n", metrics.Recall5)
+	if metrics.AbstentionTotal > 0 {
+		fmt.Fprintf(e.Stdout, "abstention = %v (%d/%d no-answer คู่ต้องไม่ match)\n",
+			metrics.AbstentionPrecision, metrics.AbstentionPass, metrics.AbstentionTotal)
+	}
 	fmt.Fprintf(e.Stdout, "MRR = %v\n", metrics.MRR)
 	origins := make([]string, 0, len(metrics.PerOrigin))
 	for o := range metrics.PerOrigin {

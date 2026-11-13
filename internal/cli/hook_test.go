@@ -44,6 +44,23 @@ func TestHookUserPromptSilentForTinyPrompt(t *testing.T) {
 	}
 }
 
+// TestHookUserPromptSilentForNonsensePrompt: a long but zero-overlap query
+// (the abstention case from the eval gate) must emit nothing — PickForQuery's
+// threshold is the abstention mechanism, not the tiny-prompt filter.
+func TestHookUserPromptSilentForNonsensePrompt(t *testing.T) {
+	home := fixtureHome(t)
+	for _, q := range []string{
+		"quantum chromodynamics lattice gauge renormalization group flow",
+		"FLRW metric dark energy equation of state w parameter",
+	} {
+		code, out, stderr := runHome(t, home, "", "hook", "--event", "user-prompt", "--query", q)
+		mustCode(t, ExitOK, code, out, stderr, "hook nonsense prompt")
+		if out != "" {
+			t.Fatalf("nonsense prompt %q injected a recall:\n%s", q, out)
+		}
+	}
+}
+
 // TestHookUserPromptInjectsRecall: a real request injects the matching record
 // and logs one inject row for the noise metric.
 func TestHookUserPromptInjectsRecall(t *testing.T) {

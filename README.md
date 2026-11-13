@@ -23,10 +23,10 @@ S5 recall gate: recall@5 0.8667 · MRR 0.85 · 30 pairs · hook latency p50 61 m
 | **Hybrid retrieval** | SQLite FTS5 (BM25) + TF-IDF sparse vectors over 400-char chunks, fused with Reciprocal Rank Fusion (k=60). Byte-for-byte ranking parity with the Python baseline. |
 | **Lifecycle governance** | `archive` (retention score < threshold → cold storage), `promote` (lesson → rule when `uses ≥ N` and `successes == uses`), `compact` (old handoffs merged into knowledge records), `supersede`, `cite`. |
 | **Decay** | Per-record `decay` (0–1) and layer-aware `half_life` (rule ∞, project 30d, handoff 3d, else 14d). Unreinforced facts sink; reinforced facts resist decay. |
-| **Write guards** | Secret scan, absolute-path refusal, PII regex (email/phone/SSN/card), prompt-injection warnings, near-duplicate block (jaccard ≥ 0.88) / warn band (0.60–0.88). Failures are observable — never silent. |
+| **Write guards** | Secret scan, absolute-path refusal, PII regex (email/phone/SSN/card), prompt-injection warnings, near-duplicate block (jaccard ≥ 0.88) / warn band (0.60–0.88), atomicity limits (warn > 1500 chars, refuse > 8000 — suggest a `knowledge` pointer), knowledge layer requires ≥ 1 tag. Failures are observable — never silent. |
 | **Hooks** | Three events (`session-start`, `user-prompt`, `stop`) × four output formats (`text`, `json`, `hermes`, `cursor`) × seven harness registries. Fail-open with a runtime log line; hooks always `exit 0` and never push. |
-| **MCP server** | 13 frozen tools over stdio JSON-RPC (`memory_context`, `memory_search`, `memory_show`, `memory_cite`, `memory_add`, `memory_list`, `memory_verify`, `memory_stats`, `memory_sync`, `memory_archive`, `memory_promote`, `memory_compact`, `memory_trace`). |
-| **Eval gate** | 30-pair golden corpus, recall@5 + MRR + threshold sweep, fail-closed against `eval/baseline.json`. Runs as a recurring gate on every engine change that can affect retrieval. |
+| **MCP server** | 13 frozen tools over stdio JSON-RPC (`memory_context`, `memory_search`, `memory_show`, `memory_cite`, `memory_add`, `memory_list`, `memory_verify`, `memory_stats`, `memory_sync`, `memory_archive`, `memory_promote`, `memory_compact`, `memory_trace`) plus read-only Resources and a bootstrap Prompt (see "MCP surfaces"). |
+| **Eval gate** | 30-pair golden corpus, recall@5 + MRR + threshold sweep + abstention (no-answer pairs must match nothing — precision must stay 1.0), fail-closed against `eval/baseline.json`. Runs as a recurring gate on every engine change that can affect retrieval. |
 | **Sync** | Any git remote (GitHub / Bitbucket / self-hosted) through the git CLI. Opt-in per memory home, never `--force`, conflicts stop with a named file. |
 | **Observability** | `mem trace <query>` prints the RRF breakdown (fts/vec/scored ranks, retention score) plus per-layer context budgets; `mem stats` reports decay buckets and harness coverage. |
 | **Installer** | `mem-install` wires MCP for nine harnesses (claude, codex, gemini, opencode, cursor, hermes, omp, kiro-cli, qoder) plus hooks where supported — idempotent, byte-backup before every write, warns on `core.hooksPath`. |
@@ -71,6 +71,38 @@ mem eval --json                     # retrieval gate against baseline
 mem mcp                             # MCP server on stdio (wire from any MCP client)
 mem hook --agent claude --event user-prompt --format json   # harness hook entry point
 ```
+
+### MCP surfaces (tools vs resources vs prompts)
+
+The server exposes three protocol surfaces, separated by who controls the call:
+
+- **Tools (writes + agent-driven calls, frozen):** the 13 `memory_*` tools —
+  the surface six installed harnesses already depend on (names, descriptions
+  and schemas pinned by `internal/mcp/tools.frozen.json` and the contract
+  tests). `memory_add` inherits the domain write guards, including the
+  atomicity limits and the knowledge-needs-a-tag rule.
+- **Resources (host-controlled reads):** the client attaches what it wants;
+  a read is never something the model decides to call. Strictly read-only —
+  no record is touched (`no_touch` semantics, proven by test):
+  - `memory://rules` — active rules as markdown (id + title + body, sorted by rel path).
+  - `memory://stats` — the `memory_stats` payload as JSON text.
+  - `memory://record/{id}` — one record in full; `{id}` resolves by exact id
+    or unique prefix like `mem show`; unknown ids are loud resource errors.
+  - `memory://context{?q,scope,budget}` — the budgeted context pack
+    (`RenderContext`) with a `provenance:` header listing the included ids.
+    Budget defaults to 20000 chars, clamped to 500..20000. Query values must
+    be RFC 3986 percent-encoded (space = `%20`, not form-encoded `+` — the
+    template matcher rejects `+`).
+  - Observability without mutation: a context read logs one inject row
+    (event `resource`) and a record read logs a show row — the same rows the
+    tool path writes, but `last_used`/`uses` never change.
+- **Prompts (user-picked entry points):** `memory_bootstrap` (arguments:
+  `scope`, `query`, both optional) renders one user message — the context
+  pack, a one-line instruction to treat it as authoritative memory context,
+  and the ids to cite.
+
+All three lists are static (no `listChanged` notifications) and stdout stays
+pure newline-delimited JSON-RPC (contract-tested).
 
 ### Visualising connections (links / graph)
 

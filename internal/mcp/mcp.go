@@ -1,8 +1,10 @@
 // Package mcp implements the MCP stdio server (design §6 "mcp" row): the 13
-// tools (plan OQ5 — additive-only compatibility premise) served over
+// frozen tools (plan OQ5 — additive-only compatibility premise) served over
 // github.com/modelcontextprotocol/go-sdk and wired to the same
 // domain/store/index layer the CLI uses (design §5: every entrypoint calls one
-// domain layer).
+// domain layer), plus the read-only Resources + Prompts surfaces
+// (resources.go: memory://rules, memory://stats, memory://record/{id},
+// memory://context{?q,scope,budget}, memory_bootstrap).
 //
 // The tool list, the descriptions and every input schema come from
 // tools.frozen.json — a verbatim copy of the Python baseline's MCP_TOOLS
@@ -86,15 +88,20 @@ func NewServer(o Options) (*mcpsdk.Server, error) {
 		&mcpsdk.Implementation{Name: ServerName, Version: Version},
 		&mcpsdk.ServerOptions{
 			Instructions: instructions(root, agent),
-			// The baseline advertises tools only, with no list-changed
-			// notifications (the frozen tool set never changes at runtime). The
-			// SDK would otherwise default to {"logging":{}} plus listChanged:true,
-			// advertising a stream this server never writes.
-			Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}},
+			// The baseline advertised tools only; resources + prompts
+			// (KB-patterns P0) are additive: host-controlled reads as
+			// resources, bootstrap as a prompt, writes stay tools. All three
+			// lists are static — no listChanged notifications, matching the
+			// frozen tool capability.
+			Capabilities: &mcpsdk.ServerCapabilities{
+				Tools:     &mcpsdk.ToolCapabilities{},
+				Resources: &mcpsdk.ResourceCapabilities{},
+				Prompts:   &mcpsdk.PromptCapabilities{},
+			},
 		},
 	)
-
 	mcpsdk.AddTool(s, mustTool("memory_context"), srv.handleContext)
+
 	mcpsdk.AddTool(s, mustTool("memory_search"), srv.handleSearch)
 	mcpsdk.AddTool(s, mustTool("memory_show"), srv.handleShow)
 	mcpsdk.AddTool(s, mustTool("memory_cite"), srv.handleCite)
@@ -107,6 +114,10 @@ func NewServer(o Options) (*mcpsdk.Server, error) {
 	mcpsdk.AddTool(s, mustTool("memory_promote"), srv.handlePromote)
 	mcpsdk.AddTool(s, mustTool("memory_compact"), srv.handleCompact)
 	mcpsdk.AddTool(s, mustTool("memory_trace"), srv.handleTrace)
+
+	// Resources + prompts (read-only surfaces beside the frozen tools) — see
+	// resources.go.
+	srv.addResources(s)
 
 	return s, nil
 }

@@ -26,7 +26,10 @@ import (
 )
 
 // Pair is one golden retrieval pair: a query and the record ids it must
-// surface (any of them counts as a hit, the earliest ranks highest).
+// surface (any of them counts as a hit, the earliest ranks highest). An empty
+// Expect is an abstention pair — the query must surface NO record at the hook
+// threshold (no-answer queries are part of the gate: precision on them must
+// stay perfect).
 type Pair struct {
 	Query  string   `json:"query"`
 	Expect []string `json:"expect"`
@@ -41,16 +44,24 @@ type OriginStat struct {
 	N       int     `json:"n"`
 }
 
-// Metrics mirrors the Python eval metrics JSON object.
+// Metrics mirrors the Python eval metrics JSON object. The abstention_* fields
+// are engine extensions (no-answer golden pairs): AbstentionPrecision is the
+// pass rate over abstention pairs and must be 1.0 whenever AbstentionTotal
+// is non-zero. Older baseline.json files without the fields load as zero
+// (abstention_total 0 — the gate treats that as "no abstention pairs").
 type Metrics struct {
-	Recall5        float64            `json:"recall5"`
-	MRR            float64            `json:"mrr"`
-	Noise          *float64           `json:"noise"`
-	NPairs         int                `json:"n_pairs"`
-	Stale          int                `json:"stale"`
-	AvgInjectChars int                `json:"avg_inject_chars"`
-	SweepGE        map[string]int     `json:"sweep_ge"`
+	Recall5        float64               `json:"recall5"`
+	MRR            float64               `json:"mrr"`
+	Noise          *float64              `json:"noise"`
+	NPairs         int                   `json:"n_pairs"`
+	Stale          int                   `json:"stale"`
+	AvgInjectChars int                   `json:"avg_inject_chars"`
+	SweepGE        map[string]int        `json:"sweep_ge"`
 	PerOrigin      map[string]OriginStat `json:"per_origin"`
+
+	AbstentionPass      int     `json:"abstention_pass"`
+	AbstentionTotal     int     `json:"abstention_total"`
+	AbstentionPrecision float64 `json:"abstention_precision"`
 }
 
 // Result carries the run outcome; Fails follows the Python gate rules and
@@ -65,7 +76,7 @@ type Result struct {
 
 // Options mirrors the Python eval flags.
 type Options struct {
-	Days         int  // recall-log window; default 14
+	Days         int // recall-log window; default 14
 	Weights      string
 	SaveBaseline bool
 
@@ -114,9 +125,12 @@ func LoadGolden(root string) ([]Pair, error) {
 			return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: query ต้องเป็น str ไม่ว่าง", i+1)
 		}
 		var ex []string
-		if err := json.Unmarshal(raw["expect"], &ex); err != nil || len(ex) == 0 {
-			return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: expect ต้องเป็น list ของ id (str ไม่ว่าง)", i+1)
+		if err := json.Unmarshal(raw["expect"], &ex); err != nil {
+			return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: expect ต้องเป็น list ของ id (str ไม่ว่าง) หรือ [] สำหรับคู่ abstention", i+1)
 		}
+		// An empty expect list is an abstention pair: the query must surface
+		// NO record at the hook threshold. Non-empty lists still require
+		// non-blank ids.
 		for _, e := range ex {
 			if strings.TrimSpace(e) == "" {
 				return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: expect ต้องเป็น list ของ id (str ไม่ว่าง)", i+1)
@@ -209,8 +223,14 @@ func Run(root string, o Options) (Result, error) {
 	for _, r := range recs {
 		status[r.ID] = r.Status
 	}
-	var live []Pair
+	var live, abst []Pair
 	for _, p := range pairs {
+		// Abstention pairs (expect: []) have no expected ids: they are always
+		// evaluated and never count as stale.
+		if len(p.Expect) == 0 {
+			abst = append(abst, p)
+			continue
+		}
 		stalePair := false
 		hasExpected := false
 		for _, e := range p.Expect {
@@ -231,7 +251,7 @@ func Run(root string, o Options) (Result, error) {
 		}
 		_ = stalePair
 	}
-	stale := len(pairs) - len(live)
+	stale := len(pairs) - len(live) - len(abst)
 
 	var fts func(query string, limit int) ([]string, error)
 	if _, statErr := os.Stat(index.IndexPath(root)); statErr == nil {
@@ -318,6 +338,25 @@ func Run(root string, o Options) (Result, error) {
 		}
 	}
 
+	// Abstention pairs: a no-answer query must surface NOTHING at the standard
+	// hook threshold — one false match makes the whole run fail (precision 1.0).
+	metrics.AbstentionTotal = len(abst)
+	for _, p := range abst {
+		picked, perr := domain.PickForQuery(recs, domain.RetrievalOptions{
+			Query: p.Query, Threshold: thr, Limit: 5, Scoring: &sc, FTS: fts,
+			Dense: o.Dense, Indexed: fts != nil,
+		})
+		if perr != nil {
+			return Result{}, perr
+		}
+		if len(picked) == 0 {
+			metrics.AbstentionPass++
+		}
+	}
+	if metrics.AbstentionTotal > 0 {
+		metrics.AbstentionPrecision = round4(float64(metrics.AbstentionPass) / float64(metrics.AbstentionTotal))
+	}
+
 	rows := readRecallLog(root, o.Days)
 	noise, injected, cited, echoed := evalNoise(rows)
 	if noise != nil {
@@ -385,6 +424,15 @@ func Run(root string, o Options) (Result, error) {
 		res.Fails = append(res.Fails, "ยังไม่มี eval/baseline.json — golden set ไม่ว่าง ต้องมี baseline ก่อน (รัน `mem eval --save-baseline`)")
 	}
 
+	// Abstention gate: absolute, not baseline-relative — any false match on a
+	// no-answer pair fails the run, whether or not the baseline predates the
+	// abstention fields (a missing baseline abstention_total reads as 0 pairs).
+	if metrics.AbstentionTotal > 0 && metrics.AbstentionPrecision < 1.0 {
+		res.Fails = append(res.Fails, fmt.Sprintf(
+			"abstention precision %v < 1.0 — คู่ no-answer ต้องไม่ match เลย (ผ่าน %d/%d)",
+			metrics.AbstentionPrecision, metrics.AbstentionPass, metrics.AbstentionTotal))
+	}
+
 	if len(res.Fails) > 0 {
 		res.Verdict = "FAIL"
 	} else {
@@ -416,10 +464,10 @@ func sortedKeys(m map[string]*[3]float64) []string {
 // ---------------------------------------------------------------------------
 
 type baselineDoc struct {
-	Date    string        `json:"date"`
-	Sha     string        `json:"sha"`
+	Date    string         `json:"date"`
+	Sha     string         `json:"sha"`
 	Scoring schema.Scoring `json:"scoring"`
-	Metrics Metrics       `json:"metrics"`
+	Metrics Metrics        `json:"metrics"`
 }
 
 func gitSHA(root string) string {

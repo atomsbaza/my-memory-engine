@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/atomsbaza/my-memory-engine/internal/store"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -559,6 +561,257 @@ func TestFrozenSnapshotIsNineExactTools(t *testing.T) {
 	if !slices.Equal(got, ToolNames) {
 		t.Errorf("frozen snapshot order = %v, want the registry order %v", got, ToolNames)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Resources + Prompts (KB-patterns P0) — read-only surfaces beside the tools
+// ---------------------------------------------------------------------------
+
+// TestCapabilitiesAdvertiseResourcesAndPrompts: the initialize handshake now
+// advertises resources and prompts beside tools (additive — tools stay frozen).
+func TestCapabilitiesAdvertiseResourcesAndPrompts(t *testing.T) {
+	cs := newSession(t, fixtureHome(t, false))
+	ir := cs.InitializeResult()
+	if ir == nil || ir.Capabilities == nil {
+		t.Fatal("initialize result carries no capabilities")
+	}
+	if ir.Capabilities.Resources == nil {
+		t.Error("capabilities do not advertise resources")
+	}
+	if ir.Capabilities.Resources != nil && ir.Capabilities.Resources.ListChanged {
+		t.Error("resource list is static — listChanged must not be advertised")
+	}
+	if ir.Capabilities.Prompts == nil {
+		t.Error("capabilities do not advertise prompts")
+	}
+	if ir.Capabilities.Prompts != nil && ir.Capabilities.Prompts.ListChanged {
+		t.Error("prompt list is static — listChanged must not be advertised")
+	}
+	if ir.Capabilities.Tools == nil {
+		t.Error("tools capability disappeared — the tool surface must stay frozen")
+	}
+}
+
+// TestResourcesListStaticAndTemplates: resources/list carries the 2 static
+// resources; resources/templates/list carries the 2 parameterized templates.
+func TestResourcesListStaticAndTemplates(t *testing.T) {
+	cs := newSession(t, fixtureHome(t, false))
+	res, err := cs.ListResources(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("resources/list: %v", err)
+	}
+	uris := map[string]bool{}
+	for _, r := range res.Resources {
+		uris[r.URI] = true
+	}
+	if !uris[RulesURI] || !uris[StatsURI] || len(res.Resources) != 2 {
+		t.Fatalf("resources/list = %v, want exactly memory://rules + memory://stats", uris)
+	}
+
+	tmpls, err := cs.ListResourceTemplates(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("resources/templates/list: %v", err)
+	}
+	got := map[string]bool{}
+	for _, rt := range tmpls.ResourceTemplates {
+		got[rt.URITemplate] = true
+	}
+	if !got[RecordURITemplate] || !got[ContextURITemplate] || len(tmpls.ResourceTemplates) != 2 {
+		t.Fatalf("resource templates = %v, want exactly record + context", got)
+	}
+}
+
+// TestRulesResource: memory://rules is markdown carrying every active rule id.
+func TestRulesResource(t *testing.T) {
+	cs := newSession(t, fixtureHome(t, false))
+	res, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: RulesURI})
+	if err != nil {
+		t.Fatalf("resources/read %s: %v", RulesURI, err)
+	}
+	if len(res.Contents) != 1 {
+		t.Fatalf("contents = %d, want 1", len(res.Contents))
+	}
+	c := res.Contents[0]
+	if c.MIMEType != "text/markdown" {
+		t.Errorf("mimeType = %q, want text/markdown", c.MIMEType)
+	}
+	for _, id := range []string{"rule.aaaa0001", "rule.aaaa0002"} {
+		if !strings.Contains(c.Text, id) {
+			t.Errorf("rules resource missing active rule %s:\n%s", id, c.Text)
+		}
+	}
+	if !strings.Contains(c.Text, "## rule.aaaa0001 —") {
+		t.Errorf("rules resource does not render id + title sections:\n%s", c.Text)
+	}
+}
+
+// TestStatsResource: memory://stats serves the memory_stats payload as JSON.
+func TestStatsResource(t *testing.T) {
+	cs := newSession(t, fixtureHome(t, false))
+	res, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: StatsURI})
+	if err != nil {
+		t.Fatalf("resources/read %s: %v", StatsURI, err)
+	}
+	c := res.Contents[0]
+	if c.MIMEType != "application/json" {
+		t.Errorf("mimeType = %q, want application/json", c.MIMEType)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(c.Text), &doc); err != nil {
+		t.Fatalf("stats resource is not JSON: %v\n%s", err, c.Text)
+	}
+	if _, ok := doc["Records"]; !ok {
+		t.Errorf("stats JSON missing Records: %v", doc)
+	}
+	// Same payload as the tool: the record count matches the tool's first line.
+	text, isErr := callTool(t, cs, "memory_stats", map[string]any{})
+	if isErr {
+		t.Fatalf("memory_stats errored: %q", text)
+	}
+	if n, _ := doc["Records"].(float64); !strings.HasPrefix(text, fmt.Sprintf("records %d", int(n))) {
+		t.Errorf("stats resource Records=%v disagrees with tool output %q", doc["Records"], firstLine(text))
+	}
+}
+
+// TestRecordResourceResolvesPrefix: memory://record/<prefix> returns the full
+// record file; an unknown id is a loud resource error.
+func TestRecordResourceResolvesPrefix(t *testing.T) {
+	root := fixtureHome(t, false)
+	cs := newSession(t, root)
+	res, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: "memory://record/rule.aaaa00"})
+	if err != nil {
+		t.Fatalf("resources/read memory://record/rule.aaaa00: %v", err)
+	}
+	if !strings.Contains(res.Contents[0].Text, "id: rule.aaaa0001") {
+		t.Errorf("record resource did not resolve the prefix to the record file:\n%s", res.Contents[0].Text)
+	}
+
+	if _, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: "memory://record/rule.deadbeef"}); err == nil {
+		t.Fatal("unknown record id must be a resource error")
+	} else if !strings.Contains(err.Error(), "ไม่พบ record") {
+		t.Errorf("error = %v, want the missing-record message", err)
+	}
+}
+
+// TestContextResource: memory://context?q=… returns the budgeted pack with a
+// provenance header of included ids; the read never touches last_used.
+func TestContextResource(t *testing.T) {
+	root := fixtureHome(t, false)
+	cs := newSession(t, root)
+	before := frontDates(t, root)
+
+	// Query values must be RFC 3986 percent-encoded (space = %20) — the
+	// template matcher does not accept form-encoded '+'.
+	uri := "memory://context?q=alpha%20bravo%20charlie&scope=global&budget=20000"
+	res, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: uri})
+	if err != nil {
+		t.Fatalf("resources/read %s: %v", uri, err)
+	}
+	text := res.Contents[0].Text
+	if !strings.Contains(text, "provenance: ") {
+		t.Errorf("context resource has no provenance header:\n%s", text)
+	}
+	if !strings.Contains(text, "lesson.bbbb0001") {
+		t.Errorf("pack/provenance should surface lesson.bbbb0001 for its own title query:\n%s", text)
+	}
+	if !strings.HasPrefix(text, "# memory context — scope global · budget 20000") {
+		t.Errorf("context header missing or wrong:\n%s", firstLine(text))
+	}
+
+	// Read-only proof: last_used/created front-matter is byte-identical.
+	if after := frontDates(t, root); !reflect.DeepEqual(before, after) {
+		t.Error("context resource read mutated record front-matter (must be no_touch)")
+	}
+}
+
+// TestContextResourceBudgetClamp: an out-of-range budget is clamped into
+// [500, 20000]; a non-numeric budget is a loud error.
+func TestContextResourceBudgetClamp(t *testing.T) {
+	cs := newSession(t, fixtureHome(t, false))
+	for _, tc := range []struct {
+		budget, want string
+	}{
+		{"10", "500"},       // below the floor → clamped up
+		{"999999", "20000"}, // above the ceiling → clamped down
+		{"1200", "1200"},    // in range → as-is
+	} {
+		uri := "memory://context?q=test&budget=" + tc.budget
+		res, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: uri})
+		if err != nil {
+			t.Fatalf("budget %s: %v", tc.budget, err)
+		}
+		if head := firstLine(res.Contents[0].Text); !strings.Contains(head, "budget "+tc.want) {
+			t.Errorf("budget %s rendered %q, want clamped to %s", tc.budget, head, tc.want)
+		}
+	}
+	uri := "memory://context?q=test&budget=many"
+	if _, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: uri}); err == nil {
+		t.Error("non-numeric budget must be a resource error")
+	}
+}
+
+// TestBootstrapPrompt: prompts/list serves memory_bootstrap; prompts/get with
+// scope/query arguments renders one user message carrying the pack, the
+// instruction and the ids for citation.
+func TestBootstrapPrompt(t *testing.T) {
+	cs := newSession(t, fixtureHome(t, false))
+	list, err := cs.ListPrompts(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("prompts/list: %v", err)
+	}
+	found := false
+	for _, p := range list.Prompts {
+		if p.Name == BootstrapPrompt {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("prompts/list = %v, want %s", list.Prompts, BootstrapPrompt)
+	}
+
+	got, err := cs.GetPrompt(context.Background(), &mcpsdk.GetPromptParams{
+		Name:      BootstrapPrompt,
+		Arguments: map[string]string{"scope": "global", "query": "alpha bravo charlie"},
+	})
+	if err != nil {
+		t.Fatalf("prompts/get %s: %v", BootstrapPrompt, err)
+	}
+	if len(got.Messages) != 1 {
+		t.Fatalf("messages = %d, want exactly 1", len(got.Messages))
+	}
+	msg := got.Messages[0]
+	if string(msg.Role) != "user" {
+		t.Errorf("role = %q, want user", msg.Role)
+	}
+	msgText := msg.Content.(*mcpsdk.TextContent).Text
+	if !strings.Contains(msgText, "authoritative") {
+		t.Errorf("message has no one-line instruction:\n%s", msgText)
+	}
+	if !strings.Contains(msgText, "lesson.bbbb0001") {
+		t.Errorf("message does not list the surfaced ids for citation:\n%s", msgText)
+	}
+}
+
+// frontDates snapshots every record's created/last_used front-matter values —
+// the read-only proof for resource reads.
+func frontDates(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	recs, err := scanFor(t, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range recs {
+		out[r.ID] = fmt.Sprint(r.Front["created"], "|", r.Front["last_used"])
+	}
+	return out
+}
+
+// scanFor lists records via the package's own scan (test-side mirror).
+func scanFor(t *testing.T, root string) ([]store.Record, error) {
+	t.Helper()
+	s := &server{root: root}
+	return s.scan()
 }
 
 // jsonEqual reports whether two JSON documents are semantically equal.

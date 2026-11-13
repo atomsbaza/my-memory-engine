@@ -4,6 +4,7 @@
 package eval
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,6 +158,132 @@ func TestEvalRegressionFailsGate(t *testing.T) {
 	}
 }
 
+// TestEvalAbstentionPairs: expect:[] pairs must surface nothing at the hook
+// threshold — precision 1.0, excluded from n_pairs/stale/recall math, and the
+// saved baseline carries the new counts.
+func TestEvalAbstentionPairs(t *testing.T) {
+	root := copyEvalHome(t)
+	rebuildIndex(t, root)
+
+	res, err := Run(root, Options{SaveBaseline: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Metrics.AbstentionTotal != 2 || res.Metrics.AbstentionPass != 2 {
+		t.Fatalf("abstention = %d/%d, want 2/2 (metrics %v)", res.Metrics.AbstentionPass, res.Metrics.AbstentionTotal, res.Metrics)
+	}
+	if res.Metrics.AbstentionPrecision != 1.0 {
+		t.Fatalf("abstention precision = %v, want 1.0", res.Metrics.AbstentionPrecision)
+	}
+	// Abstention pairs stay out of the retrieval math: same 3 live pairs.
+	if res.Metrics.NPairs != 3 || res.Metrics.Stale != 0 {
+		t.Fatalf("n_pairs = %d stale = %d, want 3/0 (metrics %v)", res.Metrics.NPairs, res.Metrics.Stale, res.Metrics)
+	}
+	if res.Metrics.Recall5 != 1.0 || res.Metrics.MRR != 1.0 {
+		t.Fatalf("recall math changed: recall %v mrr %v", res.Metrics.Recall5, res.Metrics.MRR)
+	}
+
+	// The gate run against that baseline passes with the abstention counts.
+	res, err = Run(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "PASS" || len(res.Fails) != 0 {
+		t.Fatalf("verdict = %q fails = %v", res.Verdict, res.Fails)
+	}
+	bm, err := LoadBaseline(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bm.Metrics.AbstentionTotal != 2 || bm.Metrics.AbstentionPrecision != 1.0 {
+		t.Fatalf("baseline abstention = %d/%v, want 2/1.0", bm.Metrics.AbstentionTotal, bm.Metrics.AbstentionPrecision)
+	}
+}
+
+// TestEvalAbstentionFalseMatchFails: the discriminating negative control — an
+// abstention pair whose query DOES match a record must fail the whole verdict,
+// even though recall/MRR are perfect.
+func TestEvalAbstentionFalseMatchFails(t *testing.T) {
+	root := copyEvalHome(t)
+	rebuildIndex(t, root)
+	if _, err := Run(root, Options{SaveBaseline: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rewrite one abstention pair into a query that hits lesson.face0001.
+	golden := filepath.Join(root, "eval", "golden.jsonl")
+	data, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.ReplaceAll(string(data),
+		"quantum chromodynamics lattice gauge renormalization group flow",
+		"how to stop goroutine fan-out in go")
+	if rewritten == string(data) {
+		t.Fatal("control rewrite did not change the golden file")
+	}
+	if err := os.WriteFile(golden, []byte(rewritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Run(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "FAIL" {
+		t.Fatalf("verdict = %q, want FAIL (metrics %v)", res.Verdict, res.Metrics)
+	}
+	if !strings.Contains(strings.Join(res.Fails, " · "), "abstention") {
+		t.Fatalf("fails should name the abstention miss: %v", res.Fails)
+	}
+	if res.Metrics.AbstentionPass != 1 || res.Metrics.AbstentionTotal != 2 {
+		t.Fatalf("abstention = %d/%d, want 1/2 (metrics %v)", res.Metrics.AbstentionPass, res.Metrics.AbstentionTotal, res.Metrics)
+	}
+	// Recall/MRR math untouched by the abstention failure.
+	if res.Metrics.Recall5 != 1.0 || res.Metrics.MRR != 1.0 {
+		t.Fatalf("recall math changed: recall %v mrr %v", res.Metrics.Recall5, res.Metrics.MRR)
+	}
+}
+
+// TestEvalLegacyBaselineWithoutAbstention: a baseline saved before the
+// abstention fields still loads and still gates (missing abstention = 0 pairs).
+func TestEvalLegacyBaselineWithoutAbstention(t *testing.T) {
+	root := copyEvalHome(t)
+	rebuildIndex(t, root)
+	if _, err := Run(root, Options{SaveBaseline: true}); err != nil {
+		t.Fatal(err)
+	}
+	// Strip the abstention fields the way an old baseline looks.
+	bp := filepath.Join(root, "eval", "baseline.json")
+	data, err := os.ReadFile(bp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	m := doc["metrics"].(map[string]any)
+	delete(m, "abstention_pass")
+	delete(m, "abstention_total")
+	delete(m, "abstention_precision")
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bp, append(out, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Run(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "PASS" || len(res.Fails) != 0 {
+		t.Fatalf("legacy baseline verdict = %q fails = %v", res.Verdict, res.Fails)
+	}
+}
+
 func TestEvalStalePairsSkipped(t *testing.T) {
 	root := copyEvalHome(t)
 	// Supersede one golden target: its pair goes stale (no live expect).
@@ -204,7 +331,7 @@ func TestLoadGoldenLoudErrors(t *testing.T) {
 		name, content, wantErr string
 	}{
 		{"bad json", "{\"query\": \"q\"\n", "บรรทัด 1"},
-		{"empty expect", "{\"query\": \"q\", \"expect\": []}\n", "บรรทัด 1"},
+		{"expect not a list", "{\"query\": \"q\", \"expect\": \"lesson.face0001\"}\n", "บรรทัด 1"},
 		{"blank query", "{\"query\": \" \", \"expect\": [\"lesson.face0001\"]}\n", "บรรทัด 1"},
 		{"empty id", "{\"query\": \"q\", \"expect\": [\"\"]}\n", "บรรทัด 1"},
 		{"second line", "{\"query\": \"ok\", \"expect\": [\"lesson.face0001\"]}\nnot json\n", "บรรทัด 2"},

@@ -659,17 +659,20 @@ type statsReport struct {
 	NeverWrote     []string
 }
 
-func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ StatsArgs) (*mcpsdk.CallToolResult, any, error) {
+// statsPayload assembles the statistics document (Python statsPayload) — the
+// shared data behind both the memory_stats tool (human-rendered) and the
+// memory://stats resource (JSON text).
+func (s *server) statsPayload() (p statsReport, layerOrder, sourceOrder []string, err error) {
 	recs, err := s.scan()
 	if err != nil {
-		return result("", err.Error(), true)
+		return statsReport{}, nil, nil, err
 	}
 	agents, err := loadRawAgents(s.root)
 	if err != nil {
-		return result("", err.Error(), true)
+		return statsReport{}, nil, nil, err
 	}
 
-	p := statsReport{
+	p = statsReport{
 		Records:        len(recs),
 		ByLayer:        map[string]int{},
 		BySource:       map[string]int{},
@@ -682,7 +685,6 @@ func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ Sta
 	today := timeToday()
 	// First-seen order per count map: Python keeps dict insertion order and
 	// sorts stably by count, so equal counts stay in scan order.
-	var layerOrder, sourceOrder []string
 	for _, r := range recs {
 		if _, seen := p.ByLayer[r.Layer]; !seen {
 			layerOrder = append(layerOrder, r.Layer)
@@ -749,6 +751,14 @@ func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ Sta
 		if a.Mode != "pull" && p.BySource[key] == 0 {
 			p.NeverWrote = append(p.NeverWrote, a.Name)
 		}
+	}
+	return p, layerOrder, sourceOrder, nil
+}
+
+func (s *server) handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, _ StatsArgs) (*mcpsdk.CallToolResult, any, error) {
+	p, layerOrder, sourceOrder, err := s.statsPayload()
+	if err != nil {
+		return result("", err.Error(), true)
 	}
 
 	var b strings.Builder

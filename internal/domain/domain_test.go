@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
@@ -382,6 +383,88 @@ func TestAddGuardRefusals(t *testing.T) {
 	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, " "), "prompt injection") {
 		t.Fatalf("want injection warning, got %v", res.Warnings)
 	}
+}
+
+// TestAddAtomicityGuardrail: the warn band lets the write land with a warning
+// that names the target and the pointer alternative; the hard cap refuses with
+// exit-equivalent 1 and leaves the store untouched.
+func TestAddAtomicityGuardrail(t *testing.T) {
+	root := copyHome(t)
+	before := len(scanAll(t, root))
+
+	// Warn band: 1500 < len <= 8000 — write succeeds, warning names the target.
+	warnBody := strings.Repeat("atomic warn band filler ", 70) + "\n" + provenanceMarker
+	if n := utf8.RuneCountInString(strings.TrimSpace(warnBody)); n <= WarnBodyRunes || n > MaxBodyRunes {
+		t.Fatalf("control construction: warn body = %d runes, want inside (%d, %d]", n, WarnBodyRunes, MaxBodyRunes)
+	}
+	res, err := Add(root, store.Record{Layer: "lesson", Scope: "global", Body: warnBody}, AddOptions{Title: "atomic warn"})
+	if err != nil {
+		t.Fatalf("warn-band add must succeed: %v", err)
+	}
+	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, " "), "atomicity") ||
+		!strings.Contains(strings.Join(res.Warnings, " "), "1500") {
+		t.Fatalf("want atomicity warning naming the 1500 target, got %v", res.Warnings)
+	}
+	if got := len(scanAll(t, root)); got != before+1 {
+		t.Fatalf("warn-band add must persist (records %d -> %d)", before, got)
+	}
+
+	// Hard cap: len > 8000 — refused, nothing written, message names the cap,
+	// the reason and the pointer pattern.
+	refuseBody := strings.Repeat("atomic refuse cap filler ", 340) + "\n" + provenanceMarker
+	if n := utf8.RuneCountInString(strings.TrimSpace(refuseBody)); n <= MaxBodyRunes {
+		t.Fatalf("control construction: refuse body = %d runes, want > %d", n, MaxBodyRunes)
+	}
+	_, err = Add(root, store.Record{Layer: "lesson", Scope: "global", Body: refuseBody}, AddOptions{Title: "atomic refuse"})
+	wantDomainErr(t, err, 1, "8000")
+	if msg := err.Error(); !strings.Contains(msg, "atomicity") || !strings.Contains(msg, "pointer") {
+		t.Fatalf("refusal must name the reason and the pointer pattern: %q", msg)
+	}
+	if got := len(scanAll(t, root)); got != before+1 {
+		t.Fatalf("capped add must not write (records = %d, want %d)", got, before+1)
+	}
+}
+
+// TestAddKnowledgeRequiresTag: a knowledge write without tags is refused with
+// an actionable message; with a tag it lands (pointer records need tags for
+// retrieval). Other layers stay tag-optional.
+func TestAddKnowledgeRequiresTag(t *testing.T) {
+	root := copyHome(t)
+
+	_, err := Add(root, store.Record{Layer: "knowledge", Scope: "global",
+		Body: "pointer to the long-form design note in the docs tree\n" + provenanceMarker},
+		AddOptions{Title: "design note pointer"})
+	wantDomainErr(t, err, 1, "knowledge")
+	if msg := err.Error(); !strings.Contains(msg, "--tag") {
+		t.Fatalf("refusal must tell the author to pass --tag: %q", msg)
+	}
+
+	res, err := Add(root, store.Record{Layer: "knowledge", Scope: "global",
+		Body: "pointer to the long-form design note in the docs tree\n" + provenanceMarker},
+		AddOptions{Title: "design note pointer", Tags: []string{"design"}})
+	if err != nil {
+		t.Fatalf("knowledge add with a tag must succeed: %v", err)
+	}
+	if got := recByID(t, root, res.ID).Tags; len(got) == 0 {
+		t.Fatalf("tagged knowledge record lost its tags: %v", got)
+	}
+
+	// Control: a tagless lesson is still fine — the rule is knowledge-only.
+	if _, err := Add(root, store.Record{Layer: "lesson", Scope: "global",
+		Body: "plain lessons never needed tags\n" + provenanceMarker},
+		AddOptions{Title: "tagless lesson"}); err != nil {
+		t.Fatalf("tagless lesson add must succeed: %v", err)
+	}
+}
+
+// scanAll lists every record under root (refusal-untouched-store assertions).
+func scanAll(t *testing.T, root string) []store.Record {
+	t.Helper()
+	recs, err := store.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return recs
 }
 
 func TestAddExternalSourceNeedsEvidence(t *testing.T) {

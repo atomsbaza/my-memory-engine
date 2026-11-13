@@ -165,6 +165,82 @@ func TestAddGuardsAndDedup(t *testing.T) {
 	mustCode(t, ExitOK, code, out, stderr, "add duplicate --force")
 }
 
+// TestAddAtomicityGuardrail: the CLI path warns past 1500 chars (write lands)
+// and refuses past 8000 (exit 1, nothing written) — both through domain.Add.
+func TestAddAtomicityGuardrail(t *testing.T) {
+	home := fixtureHome(t)
+
+	// Warn band: succeeds, warning on stderr names the 1500 target.
+	warnBody := strings.Repeat("cli atomicity warn filler ", 70)
+	code, out, stderr := runHome(t, home, warnBody, "add", "--layer", "lesson", "--scope", "global", "--file", "-", "--title", "cli atomic warn")
+	mustCode(t, ExitOK, code, out, stderr, "add warn band")
+	if !strings.Contains(stderr, "atomicity") || !strings.Contains(stderr, "1500") {
+		t.Fatalf("warn-band stderr must name the 1500 target: %q", stderr)
+	}
+	if fields := strings.Fields(out); len(fields) != 2 {
+		t.Fatalf("add printed %q, want <id>\\t<rel>", out)
+	}
+
+	// Hard cap: exit 1, message names the cap, and the store is untouched.
+	before := countRecords(t, home)
+	refuseBody := strings.Repeat("cli atomicity refuse filler ", 340)
+	code, out, stderr = runHome(t, home, refuseBody, "add", "--layer", "lesson", "--scope", "global", "--file", "-", "--title", "cli atomic refuse")
+	mustCode(t, ExitError, code, out, stderr, "add over cap")
+	if !strings.Contains(stderr, "8000") || !strings.Contains(stderr, "pointer") {
+		t.Fatalf("refusal must name the cap and the pointer pattern: %q", stderr)
+	}
+	if got := countRecords(t, home); got != before {
+		t.Fatalf("capped add wrote a record (count %d -> %d)", before, got)
+	}
+}
+
+// TestAddKnowledgeRequiresTag: knowledge without --tag is refused (exit 1)
+// through the same domain guard; with a tag it lands.
+func TestAddKnowledgeRequiresTag(t *testing.T) {
+	home := fixtureHome(t)
+	before := countRecords(t, home)
+
+	code, out, stderr := runHome(t, home, "pointer to the long-form note in the docs tree\n",
+		"add", "--layer", "knowledge", "--scope", "global", "--file", "-", "--title", "docs pointer")
+	mustCode(t, ExitError, code, out, stderr, "add knowledge no tag")
+	if !strings.Contains(stderr, "--tag") {
+		t.Fatalf("refusal must ask for --tag: %q", stderr)
+	}
+	if got := countRecords(t, home); got != before {
+		t.Fatalf("tagless knowledge add wrote a record (count %d -> %d)", before, got)
+	}
+
+	code, out, stderr = runHome(t, home, "pointer to the long-form note in the docs tree\n",
+		"add", "--layer", "knowledge", "--scope", "global", "--file", "-", "--title", "docs pointer", "--tag", "docs")
+	mustCode(t, ExitOK, code, out, stderr, "add knowledge with tag")
+	if got := countRecords(t, home); got != before+1 {
+		t.Fatalf("tagged knowledge add did not land (count %d -> %d)", before, got)
+	}
+}
+
+// countRecords counts record markdown files under the home (guard tests use it
+// to prove a refusal wrote nothing).
+func countRecords(t *testing.T, home string) int {
+	t.Helper()
+	n := 0
+	err := filepath.WalkDir(home, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (strings.HasPrefix(d.Name(), ".") || d.Name() == "_archive") {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") {
+			n++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 func TestAddExternalSourceNeedsEvidence(t *testing.T) {
 	home := fixtureHome(t)
 	body := "**Rule.** a captured page says budgets should double\n"

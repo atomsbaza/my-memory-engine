@@ -156,6 +156,17 @@ func deriveAddTitle(body string) string {
 	return string(runes)
 }
 
+// Atomicity guardrails on one record's body (KB-patterns P0): records are the
+// unit of retrieval and compaction, so a monolithic body pollutes both. The
+// warn band pushes authors toward small facts; the cap refuses the write — a
+// long-form source belongs outside the store, pointed at by a knowledge record.
+const (
+	// WarnBodyRunes is the soft target: bodies longer than this warn.
+	WarnBodyRunes = 1500
+	// MaxBodyRunes is the hard cap: bodies longer than this are refused.
+	MaxBodyRunes = 8000
+)
+
 // Add persists one record under root: layer/scope validation, write guards
 // (secret / absolute-path / PII → *Error{2}), source screening rules,
 // duplicate-id refusal, near-duplicate thresholds (>=0.88 block as
@@ -174,6 +185,13 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 		return AddResult{}, errf(1, "เนื้อหาว่าง — ส่งทาง stdin ด้วย --file -")
 	}
 	body += "\n"
+	// Atomicity cap: a body past MaxBodyRunes is refused outright — one
+	// record is the unit of retrieval, decay and compaction, and a monolithic
+	// body pollutes all three (memory pollution). The long-form source belongs
+	// outside the store, pointed at by a knowledge record.
+	if n := rlen(body); n > MaxBodyRunes {
+		return AddResult{}, errf(1, "body ยาว %d อักขระ เกิน cap %d (atomicity — record ยักษ์เดียว pollute การ retrieve/decay/compact ทั้งระบบ) — แบ่งเป็นหลาย record หรือเก็บ long-form ไว้ที่ source แล้วเขียน pointer record (layer knowledge + --tag) ชี้ไปแทน", n, MaxBodyRunes)
+	}
 
 	layer := rec.Layer
 	if layer == "" {
@@ -185,6 +203,13 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	}
 	if def.FileMode == "append-only" {
 		return AddResult{}, errf(1, "layer %s เป็น log แบบ append-only — ไม่ผ่าน mem add ให้ append บรรทัดตรง ๆ ใน %s/", layer, def.Dir)
+	}
+
+	// Knowledge records are the store's pointer/canonical layer: without at
+	// least one tag they are unreachable by tag-scoped retrieval, so the write
+	// is refused with an actionable message instead of persisting a dead fact.
+	if layer == "knowledge" && len(opts.Tags) == 0 {
+		return AddResult{}, errf(1, "layer knowledge ต้องมี --tag อย่างน้อย 1 ค่า — pointer/canonical record ที่ไม่มี tag จะ retrieve ไม่ได้ (ส่ง --tag ที่สื่อถึงเนื้อหา เช่น ชื่อ topic)")
 	}
 
 	scope := rec.Scope
@@ -209,6 +234,14 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	var warnings []string
 	if inj := injectionHits(guardText); len(inj) > 0 {
 		warnings = append(warnings, fmt.Sprintf("เตือน — ตรวจพบข้อความคล้าย prompt injection ('%s')", inj[0]))
+	}
+
+	// Atomicity warn band: past WarnBodyRunes the write still lands, but the
+	// author is pushed toward small facts or a pointer record (the cap above
+	// stays the hard refusal).
+	if n := rlen(body); n > WarnBodyRunes {
+		warnings = append(warnings, fmt.Sprintf(
+			"เตือน — body ยาว %d อักขระ เกิน target %d (atomicity) — พิจารณาแบ่งเป็นหลาย record หรือเขียน pointer record (layer knowledge + --tag) ชี้ไปที่ long-form source แทน", n, WarnBodyRunes))
 	}
 
 	if strings.HasPrefix(opts.Source, "external:") && len(opts.Evidence) == 0 {
