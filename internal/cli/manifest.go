@@ -13,7 +13,7 @@ import (
 func renderManifestDoc() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# mem command surface\n\n")
-	fmt.Fprintf(&b, "%d commands: %d legacy Python families + `init` + `doctor` + `embed` + `links`.\n\n", CommandCount, LegacyCommandCount)
+	fmt.Fprintf(&b, "%d commands: %d legacy Python families + `init` + `doctor` + `embed` + `links` + `graph`.\n\n", CommandCount, LegacyCommandCount)
 	fmt.Fprintf(&b, "Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.\n\n")
 	fmt.Fprintf(&b, "| command | synopsis | help | surface |\n")
 	fmt.Fprintf(&b, "|---|---|---|---|\n")

@@ -4,3 +4,7 @@ bin/
 dist/
 tests/perf/benchmark-hook-latest.json
 .claude/
+mem-graph.html
+mem-graph.json
+*.graph.html
+*.graph.json

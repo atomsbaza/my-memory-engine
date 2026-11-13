@@ -49,8 +49,8 @@ func TestManifestCounts(t *testing.T) {
 	if len(manifest) != CommandCount {
 		t.Fatalf("Manifest() = %d commands, want CommandCount %d", len(manifest), CommandCount)
 	}
-	if CommandCount != LegacyCommandCount+4 {
-		t.Fatalf("CommandCount = %d, want 21 legacy + init + doctor + embed + links", CommandCount)
+	if CommandCount != LegacyCommandCount+5 {
+		t.Fatalf("CommandCount = %d, want 21 legacy + init + doctor + embed + links + graph", CommandCount)
 	}
 	legacy := 0
 	for _, entry := range manifest {
@@ -63,7 +63,7 @@ func TestManifestCounts(t *testing.T) {
 			t.Errorf("legacy command #%d = %q, want %q (registry order is frozen)", legacy-1, entry.Name, name)
 		}
 	}
-	for _, extra := range []string{"init", "doctor", "embed", "links"} {
+	for _, extra := range []string{"init", "doctor", "embed", "links", "graph"} {
 		entry, ok := manifestEntry(extra)
 		if !ok {
 			t.Fatalf("manifest is missing %q", extra)
@@ -158,15 +158,16 @@ func TestHelpListsAllCommands(t *testing.T) {
 			t.Errorf("root help does not mention %q", name)
 		}
 	}
-	if !strings.Contains(out, "{context,search,list,show,links,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed}") {
+	if !strings.Contains(out, "{context,search,list,show,links,graph,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed}") {
 		t.Errorf("usage line does not list the full surface:\n%s", out)
 	}
 }
 
 func allNames() []string {
-	// Registry order: links sits right after show, inside the legacy block.
+	// Registry order: the two explorers sit right after show, inside the
+	// legacy block.
 	names := append([]string{}, legacyNames[:4]...)
-	names = append(names, "links")
+	names = append(names, "links", "graph")
 	return append(append(names, legacyNames[4:]...), "init", "doctor", "embed")
 }
 

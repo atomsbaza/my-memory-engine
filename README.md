@@ -57,6 +57,7 @@ export MEM_HOME=~/my-memory
 mem context                         # rules + scoped records + knowledge pointers (budgeted)
 mem search "fts5 ranking" --limit 5
 mem links lesson.1a2b0001          # how a record links to others (supersede chain, evidence, body refs)
+mem graph                           # self-contained offline HTML viewer of the whole corpus
 mem trace "security guard"          # RRF breakdown + layer allocation
 mem add --layer lesson --scope global --file - --title "..." < note.md
 mem verify                          # schema/secret/path/dup/index audit
@@ -70,6 +71,32 @@ mem eval --json                     # retrieval gate against baseline
 mem mcp                             # MCP server on stdio (wire from any MCP client)
 mem hook --agent claude --event user-prompt --format json   # harness hook entry point
 ```
+
+### Visualising connections (links / graph)
+
+`mem links <id>` answers "how does *this* record connect?" — outbound/inbound supersede
+chains, evidence ids, body `[id: …]` refs and dangling references, with `--depth` to walk a
+supersede chain transitively and `--related` for same-scope/shared-tag neighbours.
+
+`mem graph` exports the same edge extraction for the **whole corpus**:
+
+```sh
+mem graph                                       # ./mem-graph.html — offline viewer (default)
+mem graph --format json -o mem-graph.json       # stable JSON schema for tooling
+mem graph --scope repo:owner/name --layer lesson,decision
+mem graph --related                             # add implicit same-scope / shared-tag edges
+```
+
+The HTML viewer is a single self-contained file — force-directed canvas layout with zoom, pan,
+draggable nodes, search, per-layer filters, a click-through side panel of every connection, and a
+text fallback listing the top 20 nodes. It makes **no external requests** (no CDN, fonts or
+images) and renders directly from `file://`.
+
+> **Private data warning.** A generated graph embeds record ids, titles and metadata from your
+> memory repo. Never commit or share `mem-graph.html` / `mem-graph.json` — the engine repo's
+> `.gitignore` blocks both names, and `mem graph` prints a loud stderr warning when the output
+> path lands inside a source repo. Dangling ids (referenced but missing) are kept as dashed grey
+> ghost nodes so broken links stay visible; `--include-dangling=false` drops them.
 
 ### Lifecycle (archive / promote / compact)
 

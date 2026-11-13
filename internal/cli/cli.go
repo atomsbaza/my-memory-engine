@@ -46,13 +46,14 @@ const (
 	// LegacyCommandCount is the Python baseline's add_parser count.
 	LegacyCommandCount = 21
 	// CommandCount is the full surface: 21 legacy families + init + doctor
-	// + embed + links (the link explorer is an engine-only additive surface).
-	CommandCount = LegacyCommandCount + 4
+	// + embed + links + graph (both explorers are engine-only additive
+	// surfaces).
+	CommandCount = LegacyCommandCount + 5
 )
 
 // usage is the top-level usage line; mirrors Python mem's argparse banner with
 // the engine-only commands appended.
-const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,links,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed} ..."
+const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,links,graph,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed} ..."
 
 // banner is the one-line description printed under usage.
 const banner = "portable agent memory (markdown + git)"
@@ -84,14 +85,15 @@ type Env struct {
 	Stderr io.Writer
 }
 
-// commands is the 25-command registry: the 21 legacy families in Python mem's
-// order, then the four engine-only commands.
+// commands is the 26-command registry: the 21 legacy families in Python mem's
+// order, then the five engine-only commands.
 var commands = []command{
 	{Entry: Entry{Name: "context", Args: "[--project P] [--scope S] [--query Q] [--budget N] [--no-touch] [--quiet]", Help: "ดึงความจำที่เกี่ยวข้องกับงาน", Legacy: true}, run: cmdContext},
 	{Entry: Entry{Name: "search", Args: "<query> [--scope S] [--layer L]... [--limit N] [--all] [--scores]", Help: "ค้น record", Legacy: true}, run: cmdSearch},
 	{Entry: Entry{Name: "list", Args: "[--layer L] [--scope S] [--limit N] [--all] [--status ST]", Help: "ไล่รายการ record", Legacy: true}, run: cmdList},
 	{Entry: Entry{Name: "show", Args: "[<id>] [--path P]", Help: "เปิด record เต็ม", Legacy: true}, run: cmdShow},
 	{Entry: Entry{Name: "links", Args: "<id> [--depth N] [--related] [--json]", Help: "ดูว่า record เชื่อมกับตัวอื่นอย่างไร (supersede chain, evidence, body refs, dangling)"}, run: cmdLinks},
+	{Entry: Entry{Name: "graph", Args: "[--format html|json] [-o FILE] [--scope S] [--layer L[,L...]] [--related] [--include-dangling]", Help: "ส่งออกกราฟความเชื่อมโยงทั้ง corpus เป็น HTML viewer (offline) หรือ JSON"}, run: cmdGraph},
 	{Entry: Entry{Name: "add", Args: "--layer L --scope S --file F [flags]", Help: "เพิ่ม record ใหม่", Legacy: true}, run: cmdAdd},
 	{Entry: Entry{Name: "touch", Args: "<id>", Help: "อัปเดต last_used", Legacy: true}, run: cmdTouch},
 	{Entry: Entry{Name: "cite", Args: "<id>", Help: "นับว่า record ถูกใช้จริง (uses +1)", Legacy: true}, run: cmdCite},
