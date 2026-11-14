@@ -14,11 +14,15 @@ import (
 	"unicode/utf8"
 )
 
-// FRONT_ORDER mirrors the Python FRONT_ORDER list exactly (preserving Python source order).
+// FRONT_ORDER mirrors the Python FRONT_ORDER list exactly (preserving Python
+// source order), plus the engine-only "content_sha256" tail field (KB P1
+// idempotent ingest): Python's dump_front appends an unknown key after the
+// known ones, so keeping it last keeps engine-written records byte-stable for
+// both implementations.
 var FRONT_ORDER = []string{
 	"id", "title", "layer", "scope", "tags", "confidence", "decay", "half_life", "source", "session",
 	"evidence", "supersedes", "superseded_by", "promoted_from", "promoted_to", "compacted_into", "archived_at",
-	"created", "last_used", "uses", "successes", "expires", "status", "sensitivity",
+	"created", "last_used", "uses", "successes", "expires", "status", "sensitivity", "content_sha256",
 }
 
 // LIST_KEYS are fields that are always serialised as inline YAML lists.

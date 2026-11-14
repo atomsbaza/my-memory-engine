@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -658,4 +659,19 @@ func TestParseFront_BodyDropsTrailingNewline(t *testing.T) {
 	if want := "\nbody\n"; body != want {
 		t.Errorf("body with a trailing blank line = %q, want %q", body, want)
 	}
+}
+
+// FRONT_ORDER carries the engine-only content_sha256 tail field so
+// engine-written records keep one stable dump order (KB P1).
+func TestFrontOrderCarriesContentSHA(t *testing.T) {
+	for _, k := range FRONT_ORDER {
+		if k == "content_sha256" {
+			if FRONT_ORDER[len(FRONT_ORDER)-1] != k {
+				t.Errorf("content_sha256 must dump last (at %d of %d)",
+					slices.Index(FRONT_ORDER, k), len(FRONT_ORDER))
+			}
+			return
+		}
+	}
+	t.Errorf("content_sha256 missing from FRONT_ORDER: %v", FRONT_ORDER)
 }

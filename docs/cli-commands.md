@@ -10,12 +10,12 @@ Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 | `search` | `<query> [--scope S] [--layer L]... [--limit N] [--all] [--scores]` | ค้น record | legacy |
 | `list` | `[--layer L] [--scope S] [--limit N] [--all] [--status ST]` | ไล่รายการ record | legacy |
 | `show` | `[<id>] [--path P]` | เปิด record เต็ม | legacy |
-| `links` | `<id> [--depth N] [--related] [--json]` | ดูว่า record เชื่อมกับตัวอื่นอย่างไร (supersede chain, evidence, body refs, dangling) | engine |
-| `graph` | `[--format html|json] [-o FILE] [--scope S] [--layer L[,L...]] [--related] [--include-dangling]` | ส่งออกกราฟความเชื่อมโยงทั้ง corpus เป็น HTML viewer (offline) หรือ JSON | engine |
+| `links` | `<id> [--depth N] [--related] [--mentions] [--json]` | ดูว่า record เชื่อมกับตัวอื่นอย่างไร (supersede chain, evidence, body refs, mention, dangling) | engine |
+| `graph` | `[--format html|json] [-o FILE] [--scope S] [--layer L] [--related] [--mentions] [--include-dangling]` | ส่งออกกราฟความเชื่อมโยงทั้ง corpus เป็น HTML viewer (offline) หรือ JSON | engine |
 | `add` | `--layer L --scope S --file F [flags]` | เพิ่ม record ใหม่ | legacy |
 | `touch` | `<id>` | อัปเดต last_used | legacy |
 | `cite` | `<id>` | นับว่า record ถูกใช้จริง (uses +1) | legacy |
-| `review` | `<id> --evidence E` | ปลด quarantine: sensitivity -> internal (ต้องมี --evidence) | legacy |
+| `review` | `<id> --evidence E หรือ --stale [--days N] [--limit N] [--json]` | ปลด quarantine (ต้องมี --evidence) หรือรายงาน record เหลือที่ไม่ถูกใช้ (review --stale, read-only) | legacy |
 | `supersede` | `<old> --with <new> [--no-commit]` | แทนที่ record เก่าด้วยอันใหม่ | legacy |
 | `verify` | `—` | ตรวจ schema/secret/path/dup/index | legacy |
 | `reindex` | `—` | สร้าง index ใหม่ (derived) | legacy |

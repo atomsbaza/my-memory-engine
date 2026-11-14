@@ -486,6 +486,11 @@ func (s *server) handleAdd(_ context.Context, _ *mcpsdk.CallToolRequest, in AddA
 	if err != nil {
 		return result("", err.Error(), true)
 	}
+	if res.Idempotent {
+		// content_sha256 twin already on disk: nothing was written; the
+		// message names the existing id and file so the agent sees the hit.
+		return result(res.Message, "", false)
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t%s", res.ID, res.Rel)

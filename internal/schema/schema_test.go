@@ -509,3 +509,39 @@ func writeFile(t *testing.T, path string, data []byte) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 }
+
+// TestContentSHAProperty (KB P1): the optional content_sha256 must be a
+// 64-hex string when present; absent stays valid.
+func TestContentSHAProperty(t *testing.T) {
+	sch := Defaults()
+	base := map[string]any{
+		"id": "rule.aabbccdd", "layer": "rule", "scope": "global",
+		"created": "2026-01-01", "status": "active", "sensitivity": "internal",
+	}
+	if _, err := sch.ValidateRecordWithWarnings(base); err != nil {
+		t.Fatalf("record without content_sha256 must stay valid: %v", err)
+	}
+	good := map[string]any{}
+	for k, v := range base {
+		good[k] = v
+	}
+	good["content_sha256"] = strings.Repeat("ab", 32) // 64 hex chars
+	if _, err := sch.ValidateRecordWithWarnings(good); err != nil {
+		t.Errorf("well-formed content_sha256 rejected: %v", err)
+	}
+	for i, bad := range []any{
+		strings.Repeat("a", 63),
+		strings.Repeat("A", 64),
+		"zzzz" + strings.Repeat("0", 60),
+		42,
+	} {
+		rec := map[string]any{}
+		for k, v := range base {
+			rec[k] = v
+		}
+		rec["content_sha256"] = bad
+		if _, err := sch.ValidateRecordWithWarnings(rec); err == nil {
+			t.Errorf("malformed content_sha256 #%d accepted: %v", i, bad)
+		}
+	}
+}

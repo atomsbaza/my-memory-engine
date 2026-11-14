@@ -182,6 +182,17 @@ func Verify(root string) (problems, warnings []string, err error) {
 			!strings.HasPrefix(source, "import") {
 			warnings = append(warnings, fmt.Sprintf("%s: lesson ควรมี **NOT.** (anti-pattern)", r.Rel))
 		}
+
+		// content_sha256 freshness (KB P1, idempotent ingest): a present but
+		// stale hash means the body was edited by hand or predates the field
+		// — advisory only, never blocking (the next matching add simply
+		// writes a new record instead of dedup-ing against this one).
+		if stored := strField(r.Front, "content_sha256"); stored != "" &&
+			stored != ContentSHA256(r.Body) {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: content_sha256 ไม่ตรงกับ body ปัจจุบัน (tamper/stale signal)",
+				r.Rel))
+		}
 	}
 
 	rulesTotal := 0
@@ -266,4 +277,3 @@ func parentDirName(path string) string {
 	// on Windows) or canonical slash rels; filepath handles both.
 	return filepath.Base(filepath.Dir(path))
 }
-

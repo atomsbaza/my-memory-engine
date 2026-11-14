@@ -1,7 +1,7 @@
 // `mem links` — the read-only link explorer: how one record connects to the
 // rest of the corpus (outbound/inbound supersede chains, evidence ids, body
-// [id: …] markers, --related by scope/tags). It never writes: no touch, no
-// log event, no git.
+// [id: …] markers, --related by scope/tags, and with --mentions the bare id
+// mentions inside bodies). It never writes: no touch, no log event, no git.
 package cli
 
 import (
@@ -84,6 +84,7 @@ func cmdLinks(e *Env, c command, argv []string) int {
 	fs := e.flagSet(c)
 	depth := fs.Int("depth", 1, "ขยาย supersede chain แบบทอดทอง (1-10)")
 	related := fs.Bool("related", false, "แสดง same-scope และ shared-tags")
+	mentions := fs.Bool("mentions", false, "รวม id mention เปล่า (bare) ใน body เป็น edge ชนิด mention")
 	asJSON := fs.Bool("json", false, "พิมพ์เป็น JSON document เดียว")
 	args, code, stop := e.parseArgs(c, fs, argv)
 	if stop {
@@ -123,7 +124,7 @@ func cmdLinks(e *Env, c command, argv []string) int {
 	}
 
 	// Build the graph (forward edges + reverse index) in one walk.
-	graph := buildLinksGraph(recs)
+	graph := buildLinksGraph(recs, *mentions)
 
 	node := graph.byID[target.ID]
 	var outbound []linkRef
@@ -232,12 +233,13 @@ type linksGraph struct {
 }
 
 // buildLinksGraph walks the record set once, extracting each record's direct
-// outbound edges and inverting them into the inbound index.
-func buildLinksGraph(recs []store.Record) *linksGraph {
+// outbound edges (plus bare id mentions when asked) and inverting them into
+// the inbound index.
+func buildLinksGraph(recs []store.Record, mentions bool) *linksGraph {
 	g := &linksGraph{byID: map[string]*linksNode{}}
 	for i := range recs {
 		r := recs[i]
-		g.byID[r.ID] = &linksNode{rec: r, out: linksOutbound(r)}
+		g.byID[r.ID] = &linksNode{rec: r, out: linksOutboundAll(r, mentions)}
 		g.order = append(g.order, r.ID)
 	}
 	for _, id := range g.order {
@@ -287,6 +289,55 @@ func linksOutbound(r store.Record) []linkRef {
 	}
 	for _, id := range order {
 		out = append(out, linkRef{Kind: "body-ref", ID: id, Line: first[id], More: count[id] - 1})
+	}
+	return out
+}
+
+// linksOutboundAll is linksOutbound plus, when mentions is set, the bare id
+// mentions in the body. The flag is additive: with mentions==false the slice
+// is byte-identical to linksOutbound(r) — mentions default to off because
+// free-text id references are noisy (path chatter, log samples) and only
+// --mentions opts into them.
+func linksOutboundAll(r store.Record, mentions bool) []linkRef {
+	out := linksOutbound(r)
+	if !mentions {
+		return out
+	}
+	return append(out, linksMentions(r)...)
+}
+
+// linksMentionRe is the bare id reference shape --mentions opts into:
+// the six scan layers (ops/ is an append-only log, never a target).
+var linksMentionRe = regexp.MustCompile(`\b(rule|lesson|decision|handoff|knowledge|project)\.[0-9a-f]{8,16}\b`)
+
+// linksMentions extracts bare id mentions from one record's body: every id
+// that appears as a plain word, excluding ids already inside [id: …] markers
+// (they are body-ref edges), excluding self-references, deduplicated per
+// target with a +K collapse like body-ref.
+func linksMentions(r store.Record) []linkRef {
+	first := map[string]int{}
+	count := map[string]int{}
+	var order []string
+	for i, line := range strings.Split(r.Body, "\n") {
+		// Blank out bracketed [id: …] markers first: those are body-ref
+		// edges, never mentions. Same-length spaces keep line numbers true.
+		line = linksBodyRe.ReplaceAllStringFunc(line, func(m string) string {
+			return strings.Repeat(" ", len(m))
+		})
+		for _, m := range linksMentionRe.FindAllString(line, -1) {
+			if m == r.ID {
+				continue // self-mention is not a reference
+			}
+			if _, seen := first[m]; !seen {
+				first[m] = i + 1
+				order = append(order, m)
+			}
+			count[m]++
+		}
+	}
+	out := make([]linkRef, 0, len(order))
+	for _, id := range order {
+		out = append(out, linkRef{Kind: "mention", ID: id, Line: first[id], More: count[id] - 1})
 	}
 	return out
 }
@@ -457,7 +508,7 @@ func renderLinksSection(w io.Writer, header string, g *linksGraph, refs []linkRe
 		note := ""
 		if n := g.byID[ref.ID]; n != nil {
 			note = fmt.Sprintf("[%s/%s]", n.rec.Layer, n.rec.Scope)
-			if ref.Kind == "body-ref" {
+			if ref.Kind == "body-ref" || ref.Kind == "mention" {
 				note += fmt.Sprintf("  (line %d", ref.Line)
 				if ref.More > 0 {
 					note += fmt.Sprintf(", +%d more", ref.More)

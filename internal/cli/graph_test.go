@@ -92,8 +92,8 @@ func TestGraphJSONSchemaAndDedup(t *testing.T) {
 	}
 	doc := runGraphJSON(t, home)
 
-	if doc.Counts.Records != 14 {
-		t.Errorf("counts.records = %d, want 14 (links fixture)", doc.Counts.Records)
+	if doc.Counts.Records != 15 {
+		t.Errorf("counts.records = %d, want 15 (links fixture)", doc.Counts.Records)
 	}
 	if doc.Counts.Dangling != 1 {
 		t.Errorf("counts.dangling = %d, want 1 (lesson.9d9d9999)", doc.Counts.Dangling)
@@ -157,8 +157,8 @@ func TestGraphJSONSchemaAndDedup(t *testing.T) {
 	if n := graphEdgesBetween(doc, "knowledge.3c4d0001", "decision.2b3c0001"); n != 1 {
 		t.Errorf("repeated body marker produced %d edges, want 1", n)
 	}
-	if doc.Counts.Edges != 8 {
-		t.Errorf("counts.edges = %d, want 8", doc.Counts.Edges)
+	if doc.Counts.Edges != 9 {
+		t.Errorf("counts.edges = %d, want 9 (mentions-holder body-ref)", doc.Counts.Edges)
 	}
 	if graphKinds(doc, "related") != 0 {
 		t.Errorf("related edges present without --related")
@@ -330,7 +330,7 @@ func TestGraphHTMLOffline(t *testing.T) {
 	if err := json.Unmarshal([]byte(doc[start:start+end]), &embedded); err != nil {
 		t.Fatalf("embedded payload is not valid JSON: %v", err)
 	}
-	if embedded.Counts.Records != 14 || embedded.Counts.Dangling != 1 {
+	if embedded.Counts.Records != 15 || embedded.Counts.Dangling != 1 {
 		t.Errorf("embedded payload counts wrong: %+v", embedded.Counts)
 	}
 }

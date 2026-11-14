@@ -60,11 +60,12 @@ type graphOptions struct {
 	scope           string
 	layers          []string
 	related         bool
+	mentions        bool
 	includeDangling bool
 }
 
 // cmdGraph implements
-// `mem graph [--format html|json] [-o FILE] [--scope S] [--layer L[,L...]] [--related] [--include-dangling]`.
+// `mem graph [--format html|json] [-o FILE] [--scope S] [--layer L[,L...]] [--related] [--mentions] [--include-dangling]`.
 func cmdGraph(e *Env, c command, argv []string) int {
 	fs := e.flagSet(c)
 	format := fs.String("format", "html", "รูปแบบเอาต์พุต: html (viewer แบบ self-contained) | json")
@@ -73,6 +74,7 @@ func cmdGraph(e *Env, c command, argv []string) int {
 	layer := fs.String("layer", "", "กรอง layer คั่นด้วยจุลภาค (ซ้ำได้)")
 	related := fs.Bool("related", false, "เพิ่ม implicit edges: same scope + shared tags (แสดงเป็นเส้นจาง)")
 	includeDangling := fs.Bool("include-dangling", true, "แสดง ghost node ของ id ที่ถูกอ้างแต่ไม่มี record (เส้นประ)")
+	mentions := fs.Bool("mentions", false, "เพิ่ม edge ชนิด mention จาก id ที่ถูกพูดถึงเปล่า ๆ ใน body (dotted)")
 	args, code, stop := e.parseArgs(c, fs, argv)
 	if stop {
 		return code
@@ -103,6 +105,7 @@ func cmdGraph(e *Env, c command, argv []string) int {
 		scope:           *scope,
 		layers:          layers,
 		related:         *related,
+		mentions:        *mentions,
 		includeDangling: *includeDangling,
 	})
 
@@ -166,7 +169,7 @@ func buildGraphPayload(recs []store.Record, o graphOptions) *graphPayload {
 		}
 	}
 	for _, r := range kept {
-		for _, ref := range linksOutbound(r) {
+		for _, ref := range linksOutboundAll(r, o.mentions) {
 			if !exists[ref.ID] {
 				// Referenced but missing from the whole corpus (not merely
 				// filtered out): a dangling ghost node plus its edge.

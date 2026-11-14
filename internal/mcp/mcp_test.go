@@ -826,3 +826,48 @@ func jsonEqual(t *testing.T, a, b []byte) bool {
 	}
 	return reflect.DeepEqual(va, vb)
 }
+
+// TestMemoryAddIdempotent (KB P1): adding the same body through memory_add
+// twice — the second call must be a non-error result naming the existing
+// record, with no second file on disk.
+func TestMemoryAddIdempotent(t *testing.T) {
+	root := fixtureHome(t, false)
+	cs := newSession(t, root)
+	countMD := func() int {
+		n := 0
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".md") &&
+				!strings.Contains(p, "_archive") {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+
+	text := "**Rule.** MCP idempotency probe body.\n**NOT.** add twice (synthetic fixture — provenance: test-generated, not corpus-derived) (mcp idempotent)"
+	first, isErr := callTool(t, cs, "memory_add", map[string]any{
+		"text": text, "layer": "lesson", "scope": "global", "title": "mcp idempotency probe",
+	})
+	if isErr {
+		t.Fatalf("first memory_add failed: %s", first)
+	}
+	id := strings.Split(strings.TrimSpace(first), "\t")[0]
+	before := countMD()
+
+	second, isErr := callTool(t, cs, "memory_add", map[string]any{
+		"text": text, "layer": "lesson", "scope": "global", "title": "any title at all",
+	})
+	if isErr {
+		t.Fatalf("identical re-add returned an error: %s", second)
+	}
+	if !strings.HasPrefix(second, "content ซ้ำเป๊ะ (sha256 ") {
+		t.Errorf("second add result = %q, want the Thai idempotent message", second)
+	}
+	if !strings.Contains(second, id) {
+		t.Errorf("message must name the existing record %s: %q", id, second)
+	}
+	if got := countMD(); got != before {
+		t.Errorf("identical re-add changed the file count: %d -> %d", before, got)
+	}
+}

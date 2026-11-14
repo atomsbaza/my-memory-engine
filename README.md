@@ -24,6 +24,7 @@ S5 recall gate: recall@5 0.8667 · MRR 0.85 · 30 pairs · hook latency p50 61 m
 | **Lifecycle governance** | `archive` (retention score < threshold → cold storage), `promote` (lesson → rule when `uses ≥ N` and `successes == uses`), `compact` (old handoffs merged into knowledge records), `supersede`, `cite`. |
 | **Decay** | Per-record `decay` (0–1) and layer-aware `half_life` (rule ∞, project 30d, handoff 3d, else 14d). Unreinforced facts sink; reinforced facts resist decay. |
 | **Write guards** | Secret scan, absolute-path refusal, PII regex (email/phone/SSN/card), prompt-injection warnings, near-duplicate block (jaccard ≥ 0.88) / warn band (0.60–0.88), atomicity limits (warn > 1500 chars, refuse > 8000 — suggest a `knowledge` pointer), knowledge layer requires ≥ 1 tag. Failures are observable — never silent. |
+| **Idempotent ingest** | Every record carries `content_sha256` over its normalized body (NFC, LF, trailing-space and blank-run collapse). Re-adding identical content is exit 0 naming the existing record instead of a dedup block; cross-scope duplicates warn. `review --stale` reports decay candidates read-only; `links/graph --mentions` opts into bare id mentions (off by default). |
 | **Hooks** | Three events (`session-start`, `user-prompt`, `stop`) × four output formats (`text`, `json`, `hermes`, `cursor`) × seven harness registries. Fail-open with a runtime log line; hooks always `exit 0` and never push. |
 | **MCP server** | 13 frozen tools over stdio JSON-RPC (`memory_context`, `memory_search`, `memory_show`, `memory_cite`, `memory_add`, `memory_list`, `memory_verify`, `memory_stats`, `memory_sync`, `memory_archive`, `memory_promote`, `memory_compact`, `memory_trace`) plus read-only Resources and a bootstrap Prompt (see "MCP surfaces"). |
 | **Eval gate** | 30-pair golden corpus, recall@5 + MRR + threshold sweep + abstention (no-answer pairs must match nothing — precision must stay 1.0), fail-closed against `eval/baseline.json`. Runs as a recurring gate on every engine change that can affect retrieval. |
@@ -60,6 +61,7 @@ mem links lesson.1a2b0001          # how a record links to others (supersede cha
 mem graph                           # self-contained offline HTML viewer of the whole corpus
 mem trace "security guard"          # RRF breakdown + layer allocation
 mem add --layer lesson --scope global --file - --title "..." < note.md
+mem review --stale                  # staleness report: active records unused >= 90 days (read-only)
 mem verify                          # schema/secret/path/dup/index audit
 mem stats                           # counts, sources, decay buckets, harness coverage
 mem archive --dry-run               # retention-based archival plan (--threshold F to retune)
@@ -103,6 +105,61 @@ The server exposes three protocol surfaces, separated by who controls the call:
 
 All three lists are static (no `listChanged` notifications) and stdout stays
 pure newline-delimited JSON-RPC (contract-tested).
+
+### Staleness report (`review --stale`)
+
+`mem review --stale [--days N] [--limit N] [--json]` is the read-only sibling of the
+quarantine exit: it lists **active** records whose `last_used` (falling back to `created`)
+is at least `--days` (default **90**) days old, sorted days-desc with ties broken by
+taxonomy layer order then id — the same ranking `mem archive` will eventually act on, but
+without touching anything (no touch, no git, exit 0 even when empty). `--json` emits one
+object per record: `id, layer, scope, status, days, decay, retention, last_used, title, file`.
+
+```mermaid
+flowchart LR
+  A["review --stale"] --> B{"days since last_used/created<br/>≥ threshold"}
+  B -- "yes + status active" --> C["แถวในรายงาน<br/>(read-only)"]
+  B -- "no" --> D["ข้าม"]
+```
+
+Why 90: the half-life defaults (project 30d, handoff 3d, rule ∞) leave a record unused
+past 90 days at ~a quarter of its project-layer peak — old enough to be noise in every
+injection, recent enough that one `mem cite` still recovers it. The report exists so the
+decay candidates are visible *before* `mem archive --threshold` collects them.
+
+### Mention edges (`--mentions`, off by default)
+
+Bodies often reference records in plain prose (`…ดู lesson.1a2b0001 ประกอบ`) without a
+bracketed `[id: …]` marker. `mem links <id> --mentions` and `mem graph --mentions` add
+these bare references as edges of kind `mention` (rendered dotted), deduplicated per
+target with the same `+K more` collapse as body-refs, excluding self-references and
+ids already inside `[id: …]` markers; dangling mention targets become ghost nodes.
+
+The flag is **off by default** and default output is byte-identical without it: bare
+mentions are noisy (log samples, path chatter, hypothetical ids), so the corpus graph
+stays quiet unless you ask for the extra edges.
+
+### Idempotent ingest (`content_sha256`)
+
+Every record the engine writes now carries `content_sha256` — the sha256 of its
+**normalized body**: NFC unicode form, LF endings, trailing spaces stripped per line,
+runs of 3+ blank lines collapsed to one, overall trim. Nothing semantic changes, so the
+same fact hashes the same on every machine. An `add` (CLI or `memory_add`) whose
+normalized body already exists:
+
+- **same layer + scope** → idempotent success: exit 0, no file written, the result
+  message names the existing record: `content ซ้ำเป๊ะ (sha256 …) — มีอยู่แล้ว: <id> (<file>)`.
+  This replaces the old duplicate-id exit 3 for byte-identical re-adds — a retry is no
+  longer a conflict.
+- **different layer/scope** → the write still happens, with a warning naming the twin:
+  duplication across scopes can be legitimate.
+
+`mem verify` warns when a record's stored `content_sha256` no longer matches its body
+(a hand-edit or a tamper signal) — advisory only, because a stale hash only makes the
+next identical add write a new record instead of dedup-ing. Records written before the
+field existed stay valid. NFC runs on vendored Unicode tables
+(`internal/norm`, generated by `tools/gen-nfc-tables.py` and validated against Python
+`unicodedata` over every code point), so no new module dependency is needed.
 
 ### Visualising connections (links / graph)
 

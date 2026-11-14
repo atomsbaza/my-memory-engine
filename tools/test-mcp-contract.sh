@@ -19,7 +19,10 @@ mkdir -p tests/mcp
 
 frozen=internal/mcp/tools.frozen.json
 baseline_py="${MEM_PY_BIN:-$HOME/my-memory/bin/mem}"
-baseline_state="skipped (no Python baseline at $baseline_py)"
+# The recorded log is a tracked file: keep the machine's $HOME out of it
+# (hygiene-gate G7b scans every tracked file for personal identifiers).
+baseline_label="${MEM_PY_BIN:-~/my-memory/bin/mem}"
+baseline_state="skipped (no Python baseline at $baseline_label)"
 baseline_drift=0
 
 if command -v python3 >/dev/null 2>&1 && [ -f "$baseline_py" ]; then
@@ -51,7 +54,7 @@ with open(out, "w", encoding="utf-8") as fh:
 PY
   then
     if diff -u "$frozen" "$tmp" >/dev/null 2>&1; then
-      baseline_state="ok ($baseline_py)"
+      baseline_state="ok ($baseline_label)"
     else
       baseline_state="DRIFT ($baseline_py)"
       baseline_drift=1

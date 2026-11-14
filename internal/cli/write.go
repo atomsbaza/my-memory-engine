@@ -5,6 +5,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,11 @@ func cmdAdd(e *Env, c command, argv []string) int {
 	})
 	if err != nil {
 		return e.fail(err)
+	}
+	if res.Idempotent {
+		// content_sha256 twin already on disk: nothing was written.
+		fmt.Fprintln(e.Stdout, res.Message)
+		return ExitOK
 	}
 	for _, w := range res.Warnings {
 		fmt.Fprintf(e.Stderr, "mem: %s\n", w)
@@ -182,14 +188,32 @@ func cmdCite(e *Env, c command, argv []string) int {
 	return ExitOK
 }
 
-// cmdReview is the only quarantine exit — it requires screening evidence.
+// cmdReview is two verbs behind one name: the quarantine exit (the only way
+// sensitivity un-quarantines — it requires screening evidence and it writes)
+// and, with --stale, the read-only staleness report of decay candidates.
 func cmdReview(e *Env, c command, argv []string) int {
 	fs := e.flagSet(c)
 	var evidence stringsFlag
 	fs.Var(&evidence, "evidence", `เช่น "reviewed: อ่านแล้ว ปลอดภัย"`)
+	stale := fs.Bool("stale", false, "รายงาน record active ที่ไม่ถูกใช้ ≥ N วัน (read-only)")
+	days := fs.Int("days", domain.DefaultStaleDays, "threshold ของ --stale (default 90)")
+	asJSON := fs.Bool("json", false, "พิมพ์ --stale เป็น JSON array")
+	limit := fs.Int("limit", 0, "แถวสูงสุดของ --stale (0 = ทั้งหมด)")
 	args, code, stop := e.parseArgs(c, fs, argv)
 	if stop {
 		return code
+	}
+	if *days < 0 {
+		return e.usagef("--days ต้อง >= 0")
+	}
+	if *limit < 0 {
+		return e.usagef("--limit ต้อง >= 0")
+	}
+	if *stale {
+		if len(args) != 0 {
+			return e.usagef("review --stale ไม่รับ <id>: %s", args[0])
+		}
+		return cmdReviewStale(e, *days, *limit, *asJSON)
 	}
 	if code, stop := e.needArgs(len(args), 1, "<id>"); stop {
 		return code
@@ -252,5 +276,42 @@ func cmdSupersede(e *Env, c command, argv []string) int {
 		return e.fail(err)
 	}
 	fmt.Fprintf(e.Stdout, "%s -> superseded by %s\n", old, *with)
+	return ExitOK
+}
+
+// cmdReviewStale prints the staleness report: a header with the total and the
+// threshold, then one row per record, days-desc. Read-only, exit 0 even when
+// the list is empty; exit 2 only on usage errors (validated by the caller).
+func cmdReviewStale(e *Env, days, limit int, asJSON bool) int {
+	root, err := e.root()
+	if err != nil {
+		return e.fail(err)
+	}
+	entries, err := domain.StaleReport(root, days)
+	if err != nil {
+		return e.fail(err)
+	}
+	rows := entries
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	if asJSON {
+		enc := json.NewEncoder(e.Stdout)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(rows); err != nil {
+			return e.fail(err)
+		}
+		return ExitOK
+	}
+	fmt.Fprintf(e.Stdout, "stale: %d record(s) ไม่ถูกใช้ ≥ %d วัน (last_used หรือ created)\n",
+		len(entries), days)
+	if len(rows) == 0 {
+		fmt.Fprintln(e.Stdout, "  (none)")
+	}
+	for _, en := range rows {
+		fmt.Fprintf(e.Stdout, "%s  %s/%s  days=%d  decay=%.2f  %s  %s\n",
+			en.ID, en.Layer, en.Scope, en.Days, en.Decay, en.Title, en.File)
+	}
 	return ExitOK
 }

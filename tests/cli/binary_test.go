@@ -140,9 +140,28 @@ func TestBinaryWritePathExitCodes(t *testing.T) {
 		t.Fatalf("add output = %q, want the record id", out)
 	}
 
-	// 3 — same fact again (duplicate id in the same layer/scope).
-	if code, _, stderr := runBin(t, body, "--home", home, "add", "--layer", "lesson", "--scope", "global", "--file", "-"); code != 3 {
-		t.Fatalf("duplicate add: exit = %d, want 3 (%s)", code, stderr)
+	// 0 — content_sha256 idempotent ingest (KB P1): re-adding the same body
+	// is a success naming the already-present twin, never exit 3.
+	code, out, _ = runBin(t, body, "--home", home, "add", "--layer", "lesson", "--scope", "global", "--file", "-")
+	if code != 0 {
+		t.Fatalf("identical re-add: exit = %d, want 0 (%s)", code, stderr)
+	}
+	if !strings.HasPrefix(out, "content ซ้ำเป๊ะ (sha256 ") {
+		t.Fatalf("identical re-add output = %q, want the Thai idempotent message", out)
+	}
+
+	// 3 — a requested id that already exists (different content, so the
+	// content_sha256 twin does not apply).
+	conflictBody := "**Rule.** ความจำที่ต่างกันโดยสิ้นเชิงสำหรับ conflict case xcode ci"
+	if code, _, stderr := runBin(t, conflictBody,
+		"--home", home, "add", "--layer", "lesson", "--scope", "global", "--id",
+		"lesson.abcdef01", "--file", "-"); code != 0 {
+		t.Fatalf("first explicit-id add: exit = %d, want 0 (%s)", code, stderr)
+	}
+	if code, _, stderr := runBin(t, conflictBody+" (revised)",
+		"--home", home, "add", "--layer", "lesson", "--scope", "global", "--id",
+		"lesson.abcdef01", "--file", "-"); code != 3 {
+		t.Fatalf("second add with the same explicit --id and new content: exit = %d, want 3 (%s)", code, stderr)
 	}
 
 	// 2 — a secret in the body.

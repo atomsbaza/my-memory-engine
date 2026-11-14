@@ -30,7 +30,7 @@ const graphDanglingColor = "#6e7681" // ghost nodes
 
 // graphEdgeOrder is the legend/edge-kind display order.
 var graphEdgeOrder = []string{
-	"supersedes", "evidence", "body-ref", "promoted-from", "compacted-into",
+	"supersedes", "evidence", "body-ref", "mention", "promoted-from", "compacted-into",
 	"related-scope", "related-tags",
 }
 
@@ -171,6 +171,7 @@ const graphHTMLTemplate = `<!doctype html>
   .edge-supersedes { border-top: 2px solid #ff7b72; }
   .edge-evidence { border-top: 2px solid #7ee787; }
   .edge-body-ref { border-top: 1px solid #8b949e; }
+  .edge-mention { border-top: 1px dotted #8b949e; }
   .edge-promoted-from { border-top: 2px dashed #ffa657; }
   .edge-compacted-into { border-top: 2px dashed #d2a8ff; }
   .edge-related-scope, .edge-related-tags { border-top: 2px dotted #484f58; }
@@ -253,6 +254,7 @@ __FALLBACK_ITEMS__  </ol>
     'supersedes':     { color: '#ff7b72', width: 1.6, dash: null,    arrow: true },
     'evidence':       { color: '#7ee787', width: 1.2, dash: null,    arrow: true },
     'body-ref':       { color: '#8b949e', width: 0.7, dash: null,    arrow: false },
+    'mention':        { color: '#8b949e', width: 0.7, dash: [1, 4],  arrow: false },
     'promoted-from':  { color: '#ffa657', width: 1.2, dash: [6, 3],  arrow: true },
     'compacted-into': { color: '#d2a8ff', width: 1.2, dash: [6, 3],  arrow: true },
     'related-scope':  { color: '#484f58', width: 0.7, dash: [2, 4],  arrow: false },

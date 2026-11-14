@@ -528,8 +528,26 @@ func (s *Schema) ValidateRecordWithWarnings(rec map[string]any) ([]string, error
 		}
 	}
 
+	// 15. content_sha256 — optional ingest idempotency key (KB P1): a string
+	// of 64 lowercase hex. Absent is valid (records written before the
+	// field existed stay valid); a present-but-malformed value is a schema
+	// violation. A well-formed value that no longer matches the body is NOT
+	// checked here — that is mem verify's tamper/stale warning.
+	if v, ok := rec["content_sha256"]; ok {
+		h, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("schema: field \"content_sha256\" must be a string")
+		}
+		if !contentSha256Re.MatchString(h) {
+			return nil, fmt.Errorf("schema: field \"content_sha256\" must be 64 lowercase hex characters")
+		}
+	}
+
 	return warnings, nil
 }
+
+// contentSha256Re is the value shape of the optional content_sha256 field.
+var contentSha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // unknownTags returns one warning per tag absent from the taxonomy tag list.
 func (s *Schema) unknownTags(tags []string) []string {

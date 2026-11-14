@@ -133,6 +133,12 @@ type AddResult struct {
 	CommitReason string // non-empty iff !Committed
 	Superseded   string // old record id superseded by this add, "" when none
 	Warnings     []string
+
+	// Idempotent marks the content_sha256 short-circuit: no file was
+	// written, ID/Rel/Path name the already-present twin and Message is
+	// the user-facing result line.
+	Idempotent bool
+	Message    string
 }
 
 // addTitleRe strips a leading "**Bold.** " marker from the first body line,
@@ -265,6 +271,37 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	for _, r := range existingSlice {
 		existing[r.ID] = r
 	}
+
+	// content_sha256 idempotent ingest (KB P1): an identical normalized body
+	// already in the store means this write already happened. Same
+	// layer+scope → short-circuit success (exit 0, no file); a different
+	// layer/scope may be an intentional cross-scope duplication, so it only
+	// warns. Explicit overrides (--force / --supersede / --supersedes) keep
+	// their original path.
+	bodySHA := ContentSHA256(body)
+	var shaTwin *store.Record
+	for i := range existingSlice {
+		if strField(existingSlice[i].Front, "content_sha256") == bodySHA {
+			shaTwin = &existingSlice[i]
+			break
+		}
+	}
+	override := opts.Force || opts.Supersede || opts.Supersedes != ""
+	if shaTwin != nil && !override {
+		if shaTwin.Layer == layer && shaTwin.Scope == scope {
+			return AddResult{
+				ID:         shaTwin.ID,
+				Rel:        shaTwin.Rel,
+				Path:       shaTwin.Path,
+				Idempotent: true,
+				Message: fmt.Sprintf("content ซ้ำเป๊ะ (sha256 %s) — มีอยู่แล้ว: %s (%s)",
+					bodySHA, shaTwin.ID, shaTwin.Rel),
+			}, nil
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"เตือน — content_sha256 ซ้ำกับ %s (%s) ใน %s/%s — อาจตั้งใจซ้ำข้าม layer/scope",
+			shaTwin.ID, shaTwin.Rel, shaTwin.Layer, shaTwin.Scope))
+	}
 	if prev, seen := existing[recID]; seen && !opts.Force {
 		return AddResult{}, errf(3, "id นี้มีอยู่แล้ว: %s (%s) — ถ้าจะแก้ของเดิมให้ --force, ถ้าเป็นเรื่องใหม่ให้ตั้ง --id อื่น", recID, prev.Rel)
 	}
@@ -292,7 +329,6 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 			nearSim = sim
 		}
 	}
-	override := opts.Force || opts.Supersede || opts.Supersedes != ""
 	if dupRec != nil && !override {
 		return AddResult{}, errf(3, "ดูซ้ำกับ %s (%s) similarity=%.2f — ถ้าเป็นเรื่องเดียวกันให้ใช้ --supersede "+
 			"(แทนที่ของที่ซ้ำ) หรือ --supersedes <id> (ระบุของเดิมเอง)", dupRec.ID, dupRec.Rel, dupSim)
@@ -372,6 +408,7 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	if target != nil {
 		fm["supersedes"] = target.ID
 	}
+	fm["content_sha256"] = bodySHA
 
 	wr, werr := store.WriteRecordWith(root, store.Record{Front: fm, Body: body}, store.WriteOptions{NoCommit: opts.NoCommit})
 	if werr != nil {
