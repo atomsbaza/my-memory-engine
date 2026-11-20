@@ -7,7 +7,7 @@
 # is what makes the rollback provably byte-exact (`cutover-switch.sh --to
 # python` restores the same bytes `--to engine` replaced) — see P3 spec §5.4.
 #
-# usage: tools/cutover-switch.sh --to engine|python|broken [--harness claude|omp]
+# usage: tools/cutover-switch.sh --to engine|python|broken [--harness claude|omp|codex|gemini|cursor|hermes]
 #                               [--home DIR] [--engine BIN] [--python-home DIR]
 #                               [--backup] [--dry-run]
 #
@@ -25,6 +25,13 @@
 # command strings). omp = ~/.omp/agent/mcp.json (MCP command) + the extension
 # symlink ~/.omp/agent/extensions/my-memory.ts (repointed to the writer's own
 # harness/omp/my-memory.ts; rollback restores the exact link target).
+# codex = ~/.codex/config.toml ([mcp_servers.my-memory], TOML) + ~/.codex/hooks.json
+# (grouped JSON hooks). gemini = ~/.gemini/settings.json (MCP mcpServers +
+# grouped hooks in ONE file; BeforeAgent carries --format json --event-name).
+# cursor = ~/.cursor/mcp.json (mcpServers) + ~/.cursor/hooks.json (cursor's own
+# FLAT schema {"version":1,"hooks":{event:[{command}]}}). hermes =
+# ~/.hermes/config.yaml (YAML: mcp_servers + hooks.pre_llm_call/on_session_end,
+# absolute paths, hooks consent-allowlisted by hermes itself).
 #
 # Exit codes: 0 success/already-in-that-mode, 1 failure (unknown config shape,
 # JSON invalid after write), 2 usage.
@@ -62,9 +69,9 @@ case "$to" in
   *) echo "cutover-switch: --to engine|python|broken is required" >&2; exit 2 ;;
 esac
 case "$harness" in
-  claude|omp) ;;
+  claude|omp|codex|gemini|cursor|hermes) ;;
   *) # Other harnesses add their own config surfaces; refusing beats guessing a schema.
-     echo "cutover-switch: harness '$harness' not implemented yet (implemented: claude, omp)" >&2
+     echo "cutover-switch: harness '$harness' not implemented yet (implemented: claude, omp, codex, gemini, cursor, hermes)" >&2
      exit 2 ;;
 esac
 
@@ -78,30 +85,53 @@ if [ "$to" = "engine" ] && [ ! -x "$engine_bin" ]; then
 fi
 
 ext_link=""
-if [ "$harness" = "omp" ]; then
-  # omp: MCP JSON + the TS extension symlink (hook surface). No hooks JSON exists.
-  mcp_config="$home_dir/.omp/agent/mcp.json"
-  hook_config=""
-  ext_link="$home_dir/.omp/agent/extensions/my-memory.ts"
-  [ -f "$mcp_config" ] || { echo "cutover-switch: missing config: $mcp_config" >&2; exit 1; }
-  [ -L "$ext_link" ] || { echo "cutover-switch: extension symlink missing: $ext_link" >&2; exit 1; }
-else
-  mcp_config="$home_dir/.claude.json"
-  hook_config="$home_dir/.claude/settings.json"
-  for f in "$mcp_config" "$hook_config"; do
-    if [ ! -f "$f" ]; then
-      echo "cutover-switch: missing config: $f" >&2
-      exit 1
-    fi
-  done
-fi
+case "$harness" in
+  omp)
+    # omp: MCP JSON + the TS extension symlink (hook surface). No hooks JSON exists.
+    mcp_config="$home_dir/.omp/agent/mcp.json"
+    hook_config=""
+    ext_link="$home_dir/.omp/agent/extensions/my-memory.ts"
+    [ -f "$mcp_config" ] || { echo "cutover-switch: missing config: $mcp_config" >&2; exit 1; }
+    [ -L "$ext_link" ] || { echo "cutover-switch: extension symlink missing: $ext_link" >&2; exit 1; }
+    ;;
+  codex)
+    mcp_config="$home_dir/.codex/config.toml"
+    hook_config="$home_dir/.codex/hooks.json"
+    ;;
+  gemini)
+    mcp_config="$home_dir/.gemini/settings.json"
+    hook_config="$home_dir/.gemini/settings.json"
+    ;;
+  cursor)
+    mcp_config="$home_dir/.cursor/mcp.json"
+    hook_config="$home_dir/.cursor/hooks.json"
+    ;;
+  hermes)
+    mcp_config="$home_dir/.hermes/config.yaml"
+    hook_config="$home_dir/.hermes/config.yaml"
+    ;;
+  *)
+    mcp_config="$home_dir/.claude.json"
+    hook_config="$home_dir/.claude/settings.json"
+    ;;
+esac
+for f in "$mcp_config" "$hook_config"; do
+  [ -n "$f" ] || continue
+  if [ ! -f "$f" ]; then
+    echo "cutover-switch: missing config: $f" >&2
+    exit 1
+  fi
+done
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 if [ "$backup" = 1 ] && [ "$dry" = 0 ]; then
+  last=""
   for f in "$mcp_config" "$hook_config"; do
     [ -n "$f" ] || continue
+    [ "$f" = "$last" ] && continue   # gemini/hermes: MCP + hooks share one file
     cp -p "$f" "$f.bak-$stamp"
     echo "BACKUP $f.bak-$stamp sha256=$(shasum -a 256 "$f.bak-$stamp" | cut -d' ' -f1)"
+    last="$f"
   done
   if [ -n "$ext_link" ]; then
     # cp -P keeps the link itself, so the pre-switch target is preserved byte-exact.
@@ -120,6 +150,224 @@ to, home_dir, engine, python_home, dry, mcp_path, hook_path, harness, ext_link =
 dry = dry == "1"
 broken = os.path.join(home_dir, ".cutover-broken-engine", "mem")
 
+# ---------------------------------------------------------------------------
+# codex / gemini / cursor / hermes — generic spec-driven path. Same surgical
+# discipline as claude/omp: only the exact command strings naming the memory
+# binary are rewritten (json.dumps token for JSON, quoted scalar for TOML,
+# raw string for YAML), every other byte is left alone, and the result must
+# parse back with the intended commands before anything is written.
+# ---------------------------------------------------------------------------
+NEW_SPECS = {
+    "codex": {
+        "agent": "codex",
+        "mcp_kind": "toml",
+        "hook_kind": "grouped",
+        # (config event key, --event value, extra flags)
+        "events": [
+            ("SessionStart", "session-start", []),
+            ("UserPromptSubmit", "user-prompt", []),
+            ("Stop", "stop", []),
+        ],
+    },
+    "gemini": {
+        "agent": "gemini",
+        "mcp_kind": "json",
+        "hook_kind": "grouped",
+        "events": [
+            ("SessionStart", "session-start", ["--format", "json"]),
+            ("BeforeAgent", "user-prompt", ["--format", "json", "--event-name", "BeforeAgent"]),
+        ],
+    },
+    "cursor": {
+        "agent": "cursor-agent",
+        "mcp_kind": "json",
+        "hook_kind": "flat",
+        "events": [
+            ("sessionStart", "session-start", ["--format", "cursor"]),
+            ("beforeSubmitPrompt", "user-prompt", ["--format", "cursor", "--event-name", "beforeSubmitPrompt"]),
+            ("stop", "stop", []),
+        ],
+    },
+    "hermes": {
+        "agent": "hermes",
+        "mcp_kind": "yaml",
+        "hook_kind": "yaml",
+        "events": [
+            ("pre_llm_call", "user-prompt", ["--format", "hermes"]),
+            ("on_session_end", "stop", []),
+        ],
+    },
+}
+
+
+def new_harness_switch():
+    import re
+
+    spec = NEW_SPECS[harness]
+    agent = spec["agent"]
+    single_file = mcp_path == hook_path
+
+    def var_mcp(mode):
+        if mode == "engine":
+            return engine
+        if mode == "python":
+            return os.path.join(python_home, "bin", "mem")
+        return broken
+
+    def var_hook(mode, mem_event, extra):
+        ex = " ".join(extra)
+        if mode in ("engine", "broken"):
+            base = engine if mode == "engine" else broken
+            cmd = "%s hook --agent %s --event %s" % (base, agent, mem_event)
+        else:
+            cmd = "%s %s %s" % (os.path.join(python_home, "harness", "mem-hook.sh"), agent, mem_event)
+        return (cmd + " " + ex).strip()
+
+    def toml_section(text, header):
+        m = re.search(r"^\[%s\]\s*$(.*?)(?=^\[|\Z)" % re.escape(header), text, re.M | re.S)
+        return m.group(1) if m else None
+
+    def toml_string(body, key):
+        if body is None:
+            return None
+        m = re.search(r"^%s\s*=\s*\"([^\"]*)\"" % re.escape(key), body, re.M)
+        return m.group(1) if m else None
+
+    def load_mcp(kind, text, path):
+        # -> the my-memory server command string
+        if kind == "json":
+            entry = (json.loads(text).get("mcpServers") or {}).get("my-memory")
+            if not isinstance(entry, dict):
+                raise SystemExit("cutover-switch: %s has no mcpServers.my-memory entry" % path)
+            cmd = entry.get("command")
+        elif kind == "toml":
+            cmd = toml_string(toml_section(text, "mcp_servers.my-memory"), "command")
+        else:
+            import yaml
+            entry = ((yaml.safe_load(text) or {}).get("mcp_servers") or {}).get("my-memory")
+            cmd = (entry or {}).get("command")
+        if not isinstance(cmd, str) or not cmd:
+            raise SystemExit("cutover-switch: %s: my-memory server has no command string" % path)
+        return cmd
+
+    def hook_is_memory(c):
+        return isinstance(c, str) and ("mem-hook.sh" in c or " hook --agent " in c)
+
+    def load_hooks(kind, text_or_path, from_text=False):
+        # -> {event key: command} for every wired memory hook (exactly 1 each)
+        if from_text:
+            text = text_or_path
+        else:
+            text = read(text_or_path)
+        out = {}
+        if kind == "grouped":
+            doc = json.loads(text)
+            for ek, _me, _ex in spec["events"]:
+                found = []
+                for group in (doc.get("hooks") or {}).get(ek) or []:
+                    for h in (group or {}).get("hooks") or []:
+                        c = h.get("command") if isinstance(h, dict) else None
+                        if hook_is_memory(c):
+                            found.append(c)
+                out[ek] = found
+        elif kind == "flat":
+            doc = json.loads(text)
+            for ek, _me, _ex in spec["events"]:
+                found = [e.get("command") for e in (doc.get("hooks") or {}).get(ek) or []
+                         if isinstance(e, dict) and hook_is_memory(e.get("command"))]
+                out[ek] = found
+        else:
+            import yaml
+            doc = yaml.safe_load(text) or {}
+            for ek, _me, _ex in spec["events"]:
+                found = [e.get("command") for e in (doc.get("hooks") or {}).get(ek) or []
+                         if isinstance(e, dict) and hook_is_memory(e.get("command"))]
+                out[ek] = found
+        for ek, found in out.items():
+            if not found:
+                raise SystemExit("cutover-switch: hooks: no memory hook under %s" % ek)
+            if len(found) > 1:
+                raise SystemExit("cutover-switch: hooks: %d memory hooks under %s (dual writer) — resolve by hand"
+                                 % (len(found), ek))
+        return {ek: found[0] for ek, found in out.items()}
+
+    mcp_text = read(mcp_path)
+    hook_text = mcp_text if single_file else read(hook_path)
+    cur_mcp = load_mcp(spec["mcp_kind"], mcp_text, mcp_path)
+    cur_hooks = load_hooks(spec["hook_kind"], hook_text, from_text=True)
+
+    modes = [m for m in ("engine", "python", "broken")
+             if cur_mcp == var_mcp(m)
+             and all(cur_hooks[ek] == var_hook(m, me, ex) for ek, me, ex in spec["events"])]
+    if len(modes) != 1:
+        raise SystemExit("cutover-switch: %s config is in an unknown/mixed state (mcp=%r, hooks=%r) — refusing to rewrite blindly"
+                         % (harness, cur_mcp, cur_hooks))
+    current = modes[0]
+    if current == to:
+        print("STATE already mode=%s" % to)
+        for p in dict.fromkeys([mcp_path] + ([hook_path] if not single_file else [])):
+            print("FILE %s sha256=%s" % (p, sha(p)))
+        raise SystemExit(0)
+
+    plan = [("mcp", mcp_path, cur_mcp, var_mcp(to))]
+    for ek, me, ex in spec["events"]:
+        plan.append(("hook", hook_path, cur_hooks[ek], var_hook(to, me, ex)))
+
+    # Surgical replacement per file kind. JSON uses the json.dumps token (as
+    # the claude path does); TOML replaces the quoted TOML string; YAML the
+    # raw command string (plain scalar or inside double quotes). Each token
+    # must occur exactly once in its file or nothing is written.
+    for role, path, old, new in plan:
+        text = mcp_text if path == mcp_path else hook_text
+        if role == "mcp" and spec["mcp_kind"] == "toml":
+            token_old, token_new = '"%s"' % old, '"%s"' % new
+        elif role == "mcp" and spec["mcp_kind"] == "yaml":
+            # the bare MCP path is a substring of the hook commands ("bin/mem
+            # hook --agent …"), so anchor the token to the YAML key; hermes
+            # hook commands are always quoted, the server command is bare.
+            token_old, token_new = "command: " + old, "command: " + new
+        else:
+            token_old, token_new = json.dumps(old), json.dumps(new)
+        n = text.count(token_old)
+        if n != 1:
+            raise SystemExit("cutover-switch: %s: expected 1 occurrence of %s, found %d"
+                             % (path, token_old, n))
+        replaced = text.replace(token_old, token_new)
+        if token_old in replaced:
+            raise SystemExit("cutover-switch: %s: post-replace sanity failed" % path)
+        if path == mcp_path:
+            mcp_text = replaced
+        if path == hook_path:
+            hook_text = replaced
+
+    # Fail closed before writing: parse everything back and confirm the exact
+    # intended command strings are in place.
+    if load_mcp(spec["mcp_kind"], mcp_text, mcp_path) != var_mcp(to):
+        raise SystemExit("cutover-switch: post-check failed: mcp command did not change to %r" % var_mcp(to))
+    want_hooks = {ek: var_hook(to, me, ex) for ek, me, ex in spec["events"]}
+    if load_hooks(spec["hook_kind"], hook_text, from_text=True) != want_hooks:
+        raise SystemExit("cutover-switch: post-check failed: hooks did not change to %r" % want_hooks)
+
+    for _role, path, old, new in plan:
+        print("%s %s : %s -> %s" % ("PLAN" if dry else "EDIT", path, old, new))
+    if dry:
+        print("STATE dry-run mode=%s desired=%s" % (current, to))
+        raise SystemExit(0)
+
+    for path in dict.fromkeys([mcp_path] + ([hook_path] if not single_file else [])):
+        text = mcp_text if path == mcp_path else hook_text
+        mode = os.stat(path).st_mode & 0o777
+        tmp = path + ".cutover-tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+        print("FILE %s sha256=%s" % (path, sha(path)))
+    print("STATE switched mode=%s -> %s" % (current, to))
+    raise SystemExit(0)
+
+
+
 EVENTS = ["SessionStart", "UserPromptSubmit", "Stop"]
 HOOK_EVENTS = {"SessionStart": "session-start", "UserPromptSubmit": "user-prompt", "Stop": "stop"}
 
@@ -132,6 +380,9 @@ def sha(path):
 def read(path):
     with open(path, encoding="utf-8") as fh:
         return fh.read()
+
+if harness in NEW_SPECS:
+    new_harness_switch()
 
 
 def mcp_command(doc):

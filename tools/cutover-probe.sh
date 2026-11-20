@@ -26,7 +26,7 @@
 #   data.remotes      `git for-each-ref refs/remotes` digest unchanged
 #   guard.other       (optional) other harness configs unchanged vs a preflight hash file
 #
-# usage: tools/cutover-probe.sh --harness claude|omp [--live] [--home DIR]
+# usage: tools/cutover-probe.sh --harness claude|omp|codex|gemini|cursor|hermes [--live] [--home DIR]
 #                               [--repo DIR] [--engine BIN] [--expect engine|python]
 #                               [--python-home DIR] [--guard FILE] [--json]
 #
@@ -74,8 +74,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$harness" in
-  claude|omp) ;;
-  *) echo "cutover-probe: harness '$harness' not implemented yet (implemented: claude, omp)" >&2
+  claude|omp|codex|gemini|cursor|hermes) ;;
+  *) echo "cutover-probe: harness '$harness' not implemented yet (implemented: claude, omp, codex, gemini, cursor, hermes)" >&2
      exit 2 ;;
 esac
 case "$expect" in engine|python) ;; *) echo "cutover-probe: --expect engine|python" >&2; exit 2 ;; esac
@@ -93,19 +93,50 @@ agent=claude
 mcp_config="$config_home/.claude.json"
 hook_config="$config_home/.claude/settings.json"
 ext_link=""
-if [ "$harness" = "omp" ]; then
-  # omp (oh-my-pi): MCP lives in ~/.omp/agent/mcp.json; the hook surface is the
-  # TS extension symlinked into the engine repo — there is no hooks JSON file.
-  agent=oh-my-pi
-  mcp_config="$config_home/.omp/agent/mcp.json"
-  hook_config=""
-  ext_link="$config_home/.omp/agent/extensions/my-memory.ts"
-fi
+mcp_kind="json"
+hook_kind="claude"          # claude = grouped hooks json · omp = extension file
+case "$harness" in
+  omp)
+    # omp (oh-my-pi): MCP lives in ~/.omp/agent/mcp.json; the hook surface is the
+    # TS extension symlinked into the engine repo — there is no hooks JSON file.
+    agent=oh-my-pi
+    mcp_config="$config_home/.omp/agent/mcp.json"
+    hook_config=""
+    ext_link="$config_home/.omp/agent/extensions/my-memory.ts"
+    hook_kind="omp"
+    ;;
+  codex)
+    agent=codex
+    mcp_config="$config_home/.codex/config.toml"
+    hook_config="$config_home/.codex/hooks.json"
+    mcp_kind="toml"
+    hook_kind="grouped"
+    ;;
+  gemini)
+    agent=gemini
+    mcp_config="$config_home/.gemini/settings.json"
+    hook_config="$config_home/.gemini/settings.json"
+    hook_kind="grouped"
+    ;;
+  cursor)
+    agent=cursor-agent
+    mcp_config="$config_home/.cursor/mcp.json"
+    hook_config="$config_home/.cursor/hooks.json"
+    hook_kind="flat"
+    ;;
+  hermes)
+    agent=hermes
+    mcp_config="$config_home/.hermes/config.yaml"
+    hook_config="$config_home/.hermes/config.yaml"
+    mcp_kind="yaml"
+    hook_kind="yaml"
+    ;;
+esac
 [ -f "$mcp_config" ] || { echo "cutover-probe: missing $mcp_config" >&2; exit 1; }
-if [ "$harness" = "claude" ]; then
-  [ -f "$hook_config" ] || { echo "cutover-probe: missing $hook_config" >&2; exit 1; }
-else
+if [ "$harness" = "omp" ]; then
   [ -L "$ext_link" ] || { echo "cutover-probe: extension symlink missing: $ext_link" >&2; exit 1; }
+elif [ -n "$hook_config" ]; then
+  [ -f "$hook_config" ] || { echo "cutover-probe: missing $hook_config" >&2; exit 1; }
 fi
 
 tmp="$(mktemp -d -t cutover-probe)"
@@ -155,8 +186,128 @@ writes_before="$(stat_field claude_writes)"
 remotes_before="$(digest_remotes)"
 
 # ---------------------------------------------------------------------------
-# Static config checks
+# Static config checks — codex / gemini / cursor / hermes (generic path)
 # ---------------------------------------------------------------------------
+if [ "$harness" = codex ] || [ "$harness" = gemini ] || [ "$harness" = cursor ] || [ "$harness" = hermes ]; then
+python3 - "$mcp_config" "$hook_config" "$engine_bin" "$expect" "$python_home" "$agent" "$harness" "$mcp_kind" "$hook_kind" <<'PY' > "$tmp/config.out" 2>&1
+import json, os, re, sys
+mcp_path, hook_path, engine, expect, python_home, agent, harness, mcp_kind, hook_kind = sys.argv[1:10]
+SECRET = [
+    re.compile(r"sk-[A-Za-z0-9]{16,}"),
+    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"apikey_[A-Za-z0-9]{16,}"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY"),
+]
+SPECS = {
+    "codex": [("SessionStart", "session-start", []), ("UserPromptSubmit", "user-prompt", []), ("Stop", "stop", [])],
+    "gemini": [("SessionStart", "session-start", ["--format", "json"]),
+               ("BeforeAgent", "user-prompt", ["--format", "json", "--event-name", "BeforeAgent"])],
+    "cursor": [("sessionStart", "session-start", ["--format", "cursor"]),
+               ("beforeSubmitPrompt", "user-prompt", ["--format", "cursor", "--event-name", "beforeSubmitPrompt"]),
+               ("stop", "stop", [])],
+    "hermes": [("pre_llm_call", "user-prompt", ["--format", "hermes"]), ("on_session_end", "stop", [])],
+}
+
+def emit(name, ok, detail):
+    print("%s\t%s\t%s" % (name, "PASS" if ok else "FAIL", detail.replace("\t", " ").replace("\n", " ")))
+
+def want_mcp():
+    if expect == "python":
+        return os.path.join(python_home, "bin", "mem")
+    return engine
+
+def want_hook(mem_event, extra):
+    ex = " ".join(extra)
+    if expect == "python":
+        return (os.path.join(python_home, "harness", "mem-hook.sh") + " " + agent + " " + mem_event + " " + ex).strip()
+    return (engine + " hook --agent " + agent + " --event " + mem_event + " " + ex).strip()
+
+def toml_section(text, header):
+    m = re.search(r"^\[%s\]\s*$(.*?)(?=^\[|\Z)" % re.escape(header), text, re.M | re.S)
+    return m.group(1) if m else None
+
+try:
+    mcp_text = open(mcp_path, encoding="utf-8").read()
+    if mcp_kind == "json":
+        entry = (json.loads(mcp_text).get("mcpServers") or {}).get("my-memory") or {}
+        cmd, args, env = entry.get("command"), entry.get("args") or [], entry.get("env") or {}
+    elif mcp_kind == "toml":
+        body = toml_section(mcp_text, "mcp_servers.my-memory")
+        envbody = toml_section(mcp_text, "mcp_servers.my-memory.env")
+        if body is None:
+            raise ValueError("no [mcp_servers.my-memory] section")
+        cm = re.search(r"^command\s*=\s*\"([^\"]*)\"", body, re.M)
+        am = re.search(r"^args\s*=\s*\[(.*)\]", body, re.M)
+        cmd = cm.group(1) if cm else None
+        args = re.findall(r'"([^"]*)"', am.group(1)) if am else []
+        env = {}
+        if envbody is not None:
+            em = re.search(r"^MEM_AGENT\s*=\s*\"([^\"]*)\"", envbody, re.M)
+            if em:
+                env["MEM_AGENT"] = em.group(1)
+    else:
+        import yaml
+        entry = ((yaml.safe_load(mcp_text) or {}).get("mcp_servers") or {}).get("my-memory") or {}
+        cmd, args, env = entry.get("command"), entry.get("args") or [], entry.get("env") or {}
+    if cmd is None:
+        raise ValueError("my-memory server has no command string")
+except Exception as err:
+    emit("config.parse", False, "parse failed: %s" % err)
+    raise SystemExit(0)
+
+emit("config.mcp", cmd == want_mcp() and args == ["mcp"] and env.get("MEM_AGENT") == agent,
+     "command=%r args=%r MEM_AGENT=%r (want %r)" % (cmd, args, env.get("MEM_AGENT"), want_mcp()))
+
+try:
+    if hook_kind == "yaml":
+        import yaml
+        doc = yaml.safe_load(open(hook_path, encoding="utf-8").read()) or {}
+    else:
+        doc = json.load(open(hook_path, encoding="utf-8"))
+except Exception as err:
+    emit("config.parse", False, "hooks parse failed: %s" % err)
+    raise SystemExit(0)
+
+def memory_cmds(ek):
+    found = []
+    if hook_kind == "grouped":
+        for group in (doc.get("hooks") or {}).get(ek) or []:
+            for h in (group or {}).get("hooks") or []:
+                c = h.get("command") if isinstance(h, dict) else None
+                if isinstance(c, str) and ("mem-hook.sh" in c or " hook --agent " in c):
+                    found.append(c)
+    else:
+        for e in (doc.get("hooks") or {}).get(ek) or []:
+            c = e.get("command") if isinstance(e, dict) else None
+            if isinstance(c, str) and ("mem-hook.sh" in c or " hook --agent " in c):
+                found.append(c)
+    return found
+
+specs = SPECS[harness]
+hook_cmds = {ek: memory_cmds(ek) for ek, _me, _ex in specs}
+dual = [c for found in hook_cmds.values() for c in found if "mem-hook.sh" in c] if expect == "engine" else []
+mismatch = []
+for ek, me, ex in specs:
+    want = want_hook(me, ex)
+    if hook_cmds.get(ek) != [want]:
+        mismatch.append("%s: got=%s want=%s" % (ek, hook_cmds.get(ek), want))
+emit("config.hooks", not mismatch,
+     ("all %d hooks == %s command" % (len(specs), expect)) if not mismatch else "; ".join(mismatch))
+emit("config.no-dual", not dual, "python wrapper hooks present: %d" % len(dual))
+
+blob = json.dumps({"cmd": cmd, "args": args, "env": env}, ensure_ascii=False) + " " + " ".join(sum(hook_cmds.values(), []))
+hits = [p.pattern for p in SECRET if p.search(blob)]
+emit("config.no-creds", not hits, "secret-shaped strings: %s" % (hits or "none"))
+sync = [c for c in sum(hook_cmds.values(), []) if re.search(r"\bmem\b.*\bsync\b", c)]
+emit("config.no-sync", not sync, "hook commands invoking sync: %d" % len(sync))
+PY
+run_checks < "$tmp/config.out"
+fi
+
+# ---------------------------------------------------------------------------
+# Static config checks — claude / omp
+# ---------------------------------------------------------------------------
+if [ "$harness" = claude ] || [ "$harness" = omp ]; then
 python3 - "$mcp_config" "$hook_config" "$engine_bin" "$expect" "$python_home" "$agent" "$ext_link" <<'PY' > "$tmp/config.out" 2>&1
 import json, os, re, sys
 mcp_path, hook_path, engine, expect, python_home, agent, ext_link = sys.argv[1:8]
@@ -267,6 +418,7 @@ sync = [c for c in sum(hook_cmds.values(), []) if re.search(r"\bmem\b.*\bsync\b"
 emit("config.no-sync", not sync, "hook commands invoking sync: %d" % len(sync))
 PY
 run_checks < "$tmp/config.out"
+fi
 
 # ---------------------------------------------------------------------------
 # Guard: other harness configs unchanged
@@ -292,11 +444,26 @@ fi
 if [ "$live" = 1 ]; then
   frozen="$here/../internal/mcp/tools.frozen.json"
   probe_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  MEM_HOME="$repo" python3 - "$mcp_config" "$repo" "$frozen" "$probe_id" "$expect" "$tmp" "$agent" <<'PY' > "$tmp/mcp.out" 2>"$tmp/mcp.err"
+  MEM_HOME="$repo" python3 - "$mcp_config" "$repo" "$frozen" "$probe_id" "$expect" "$tmp" "$agent" "$mcp_kind" <<'PY' > "$tmp/mcp.out" 2>"$tmp/mcp.err"
 import json, os, re, select, subprocess, sys, time
 
-mcp_path, repo, frozen_path, probe_id, expect, work, agent = sys.argv[1:8]
-entry = (json.load(open(mcp_path, encoding="utf-8")).get("mcpServers") or {}).get("my-memory") or {}
+mcp_path, repo, frozen_path, probe_id, expect, work, agent, mcp_kind = sys.argv[1:9]
+if mcp_kind == "json":
+    entry = (json.load(open(mcp_path, encoding="utf-8")).get("mcpServers") or {}).get("my-memory") or {}
+elif mcp_kind == "toml":
+    text = open(mcp_path, encoding="utf-8").read()
+    m = re.search(r"^\[mcp_servers\.my-memory\]\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    body = m.group(1) if m else ""
+    cm = re.search(r"^command\s*=\s*\"([^\"]*)\"", body, re.M)
+    am = re.search(r"^args\s*=\s*\[(.*)\]", body, re.M)
+    em = re.search(r"^\[mcp_servers\.my-memory\.env\]\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    envm = re.search(r"^MEM_AGENT\s*=\s*\"([^\"]*)\"", em.group(1) if em else "", re.M)
+    entry = {"command": cm.group(1) if cm else None,
+             "args": re.findall(r'"([^"]*)"', am.group(1)) if am else [],
+             "env": {"MEM_AGENT": envm.group(1)} if envm else {}}
+else:
+    import yaml
+    entry = ((yaml.safe_load(open(mcp_path, encoding="utf-8").read()) or {}).get("mcp_servers") or {}).get("my-memory") or {}
 argv = [entry.get("command")] + list(entry.get("args") or [])
 env = dict(os.environ)
 env.update({str(k): str(v) for k, v in (entry.get("env") or {}).items()})
@@ -305,6 +472,11 @@ env["MEM_HOME"] = repo
 expected = None
 if frozen_path and os.path.exists(frozen_path):
     expected = [t["name"] for t in json.load(open(frozen_path, encoding="utf-8"))]
+    add_path = os.path.join(os.path.dirname(frozen_path), "tools.additive.json")
+    if os.path.exists(add_path):
+        # engine contract: tools/list is exactly frozen 13 + the engine-only
+        # additive tools (internal/mcp: AdditiveToolNames / tools.additive.json)
+        expected += [t["name"] for t in json.load(open(add_path, encoding="utf-8"))]
 
 def emit(name, ok, detail):
     print("%s\t%s\t%s" % (name, "PASS" if ok else "FAIL", str(detail).replace("\t", " ").replace("\n", " ")[:400]))
@@ -436,16 +608,30 @@ SH
   chmod +x "$tmp/bin/git"
   : > "$tmp/push.log"
 
-  hook_cmd() {
-    python3 - "$hook_config" "$1" <<'PY'
+  hook_cmd() { # event-key -> the configured memory hook command (kind-aware)
+    python3 - "$hook_config" "$1" "$hook_kind" <<'PY'
 import json, sys
-path, event = sys.argv[1:3]
-doc = json.load(open(path, encoding="utf-8"))
-for group in (doc.get("hooks") or {}).get(event) or []:
-    for h in (group or {}).get("hooks") or []:
-        c = h.get("command") if isinstance(h, dict) else None
+path, event, kind = sys.argv[1:4]
+if kind == "yaml":
+    import yaml
+    doc = yaml.safe_load(open(path, encoding="utf-8").read()) or {}
+    for e in (doc.get("hooks") or {}).get(event) or []:
+        c = e.get("command") if isinstance(e, dict) else None
         if isinstance(c, str) and ("mem-hook.sh" in c or " hook --agent " in c):
             print(c); raise SystemExit
+    raise SystemExit
+doc = json.load(open(path, encoding="utf-8"))
+if kind == "flat":
+    for e in (doc.get("hooks") or {}).get(event) or []:
+        c = e.get("command") if isinstance(e, dict) else None
+        if isinstance(c, str) and ("mem-hook.sh" in c or " hook --agent " in c):
+            print(c); raise SystemExit
+else:
+    for group in (doc.get("hooks") or {}).get(event) or []:
+        for h in (group or {}).get("hooks") or []:
+            c = h.get("command") if isinstance(h, dict) else None
+            if isinstance(c, str) and ("mem-hook.sh" in c or " hook --agent " in c):
+                print(c); raise SystemExit
 PY
   }
 
@@ -464,7 +650,53 @@ PY
     fi
   }
 
-  run_hook() { # event payload-file label require-output (claude: cmd lives in settings.json)
+  fmt_check() { # label outfile kind expected-event-name — prints one TSV check line
+    python3 - "$1" "$2" "$3" "${4:-}" <<'PY'
+import json, sys
+label, path, kind, evname = sys.argv[1:5]
+try:
+    text = open(path, encoding="utf-8").read()
+except Exception:
+    text = ""
+if not text.strip():
+    print("%s\tFAIL\t%s: no output to validate" % (label, kind))
+    raise SystemExit
+try:
+    if kind == "gemini":
+        d = json.loads(text)
+        h = d.get("hookSpecificOutput") or {}
+        ctx = h.get("additionalContext")
+        ok = isinstance(ctx, str) and bool(ctx) and (not evname or h.get("hookEventName") == evname)
+        detail = "hookEventName=%r additionalContext=%dB" % (h.get("hookEventName"), len(ctx or ""))
+    elif kind == "cursor":
+        d = json.loads(text)
+        ctx = d.get("additional_context")
+        ok = isinstance(ctx, str)
+        if evname.lower() == "beforesubmitprompt":
+            ok = ok and d.get("continue") is True
+        detail = "continue=%r additional_context=%dB" % (d.get("continue"), len(ctx or ""))
+    elif kind == "hermes":
+        d = json.loads(text)
+        ctx = d.get("context")
+        ok = isinstance(ctx, str) and bool(ctx)
+        detail = "context=%dB" % len(ctx or "")
+    else:
+        raise SystemExit
+    print("%s\t%s\t%s" % (label, "PASS" if ok else "FAIL", detail))
+except SystemExit:
+    raise
+except Exception as err:
+    print("%s\tFAIL\tnot valid %s output: %s" % (label, kind, err))
+PY
+  }
+
+  hook_format_check() { # label kind event-name — validate exec_hook's stdout contract
+    line="$(fmt_check "$1" "$tmp/$1.out" "$2" "${3:-}" | tail -1)"
+    [ -n "$line" ] && run_checks <<< "$line"
+    return 0
+  }
+
+  run_hook() { # event payload-file label require-output
     cmd="$(hook_cmd "$1")"
     if [ -z "$cmd" ]; then
       report "$3" FAIL "no memory hook configured for $1"
@@ -491,7 +723,7 @@ PY
     exec_hook hook.session-start "$cmd_ss" "$tmp/ss.json" require
     exec_hook hook.user-prompt "$cmd_up" "$tmp/up.json" optional
     exec_hook hook.stop "$cmd_st" "$tmp/st.json" optional
-  else
+  elif [ "$harness" = "claude" ]; then
     printf '%s' '{"session_id":"cutover-probe","transcript_path":"","cwd":"'"$hook_repo"'","hook_event_name":"SessionStart","source":"startup"}' > "$tmp/ss.json"
     printf '%s' '{"session_id":"cutover-probe","cwd":"'"$hook_repo"'","hook_event_name":"UserPromptSubmit","prompt":"my-memory engine cutover probe recall check"}' > "$tmp/up.json"
     printf '%s' '{"session_id":"cutover-probe","cwd":"'"$hook_repo"'","hook_event_name":"Stop","stop_hook_active":false}' > "$tmp/st.json"
@@ -499,6 +731,43 @@ PY
     run_hook SessionStart "$tmp/ss.json" hook.session-start require
     run_hook UserPromptSubmit "$tmp/up.json" hook.user-prompt optional
     run_hook Stop "$tmp/st.json" hook.stop optional
+  elif [ "$harness" = "codex" ]; then
+    # codex uses the claude hook schema (grouped hooks.json, claude-shaped payloads)
+    printf '%s' '{"session_id":"cutover-probe","transcript_path":"","cwd":"'"$hook_repo"'","hook_event_name":"SessionStart","source":"startup"}' > "$tmp/ss.json"
+    printf '%s' '{"session_id":"cutover-probe","cwd":"'"$hook_repo"'","hook_event_name":"UserPromptSubmit","prompt":"my-memory engine cutover probe recall check codex"}' > "$tmp/up.json"
+    printf '%s' '{"session_id":"cutover-probe","cwd":"'"$hook_repo"'","hook_event_name":"Stop","stop_hook_active":false}' > "$tmp/st.json"
+
+    run_hook SessionStart "$tmp/ss.json" hook.session-start require
+    run_hook UserPromptSubmit "$tmp/up.json" hook.user-prompt optional
+    run_hook Stop "$tmp/st.json" hook.stop optional
+  elif [ "$harness" = "gemini" ]; then
+    # gemini: pure-JSON stdout contract; BeforeAgent is the prompt hook (no Stop hook)
+    printf '%s' '{"session_id":"cutover-probe"}' > "$tmp/ss.json"
+    printf '%s' '{"session_id":"cutover-probe","prompt":"my-memory engine cutover probe recall check gemini"}' > "$tmp/up.json"
+
+    run_hook SessionStart "$tmp/ss.json" hook.session-start require
+    hook_format_check hook.session-start gemini SessionStart
+    run_hook BeforeAgent "$tmp/up.json" hook.user-prompt require
+    hook_format_check hook.user-prompt gemini BeforeAgent
+  elif [ "$harness" = "cursor" ]; then
+    # cursor: flat hooks schema; beforeSubmitPrompt must answer continue:true
+    printf '%s' '{"session_id":"cutover-probe","conversation_id":"cutover-probe"}' > "$tmp/ss.json"
+    printf '%s' '{"session_id":"cutover-probe","conversation_id":"cutover-probe","prompt":"my-memory engine cutover probe recall check cursor"}' > "$tmp/up.json"
+    printf '%s' '{"session_id":"cutover-probe","conversation_id":"cutover-probe"}' > "$tmp/st.json"
+
+    run_hook sessionStart "$tmp/ss.json" hook.session-start require
+    hook_format_check hook.session-start cursor sessionStart
+    run_hook beforeSubmitPrompt "$tmp/up.json" hook.user-prompt require
+    hook_format_check hook.user-prompt cursor beforeSubmitPrompt
+    run_hook stop "$tmp/st.json" hook.stop optional
+  elif [ "$harness" = "hermes" ]; then
+    # hermes: pre_llm_call injects {"context":…}; on_session_end commits (no session-start)
+    printf '%s' '{"session_id":"cutover-probe","message":"my-memory engine cutover probe recall check hermes"}' > "$tmp/up.json"
+    printf '%s' '{"session_id":"cutover-probe"}' > "$tmp/st.json"
+
+    run_hook pre_llm_call "$tmp/up.json" hook.user-prompt require
+    hook_format_check hook.user-prompt hermes
+    run_hook on_session_end "$tmp/st.json" hook.stop optional
   fi
 
   pushes=$(wc -l < "$tmp/push.log" | tr -d ' ')
