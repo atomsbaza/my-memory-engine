@@ -110,7 +110,27 @@ type Schema struct {
 	IDPattern          *regexp.Regexp
 	DatePattern        *regexp.Regexp
 	TitleMinLength     int
+
+	// FieldMaxLength caps the optional SIM provenance/outcome fields
+	// (problem, predicted, observed, model — v0.3 SIM batch). Defaults are
+	// the engine's portable limits; a record.schema.json maxLength on the
+	// same property overrides them.
+	FieldMaxLength map[string]int
 }
+
+// SIM field length defaults (schema/record.schema.json maxLength hints):
+// problem is a root-cause grouping key (short, slug-like), predicted is the
+// pre-verification prediction, observed the post-use measured summary,
+// model the policy-model provenance tag.
+var defaultFieldMaxLength = map[string]int{
+	"problem":   80,
+	"predicted": 200,
+	"observed":  200,
+	"model":     40,
+}
+
+// simFields lists the SIM fields in validation order.
+var simFields = []string{"problem", "predicted", "observed", "model"}
 
 // --- portable defaults -----------------------------------------------------
 
@@ -191,6 +211,7 @@ type rawProperty struct {
 	Pattern   string   `json:"pattern"`
 	Enum      []string `json:"enum"`
 	MinLength *int     `json:"minLength"`
+	MaxLength *int     `json:"maxLength"`
 }
 
 type rawRecordSchema struct {
@@ -337,6 +358,16 @@ func (s *Schema) applyRecordSchema(rs rawRecordSchema) (bool, error) {
 	if p, ok := rs.Properties["title"]; ok && p.MinLength != nil {
 		s.TitleMinLength = *p.MinLength
 	}
+	// SIM field caps: a maxLength on problem/predicted/observed/model
+	// overrides the portable default.
+	for _, f := range simFields {
+		if p, ok := rs.Properties[f]; ok && p.MaxLength != nil && *p.MaxLength > 0 {
+			if s.FieldMaxLength == nil {
+				s.FieldMaxLength = map[string]int{}
+			}
+			s.FieldMaxLength[f] = *p.MaxLength
+		}
+	}
 	return idPatternSet, nil
 }
 
@@ -376,6 +407,7 @@ func buildDefault() Schema {
 		IDPattern:          regexp.MustCompile(defaultIDPattern),
 		DatePattern:        regexp.MustCompile(defaultDatePattern),
 		TitleMinLength:     defaultTitleMinLen,
+		FieldMaxLength:     copyInts(defaultFieldMaxLength),
 	}
 }
 
@@ -540,6 +572,23 @@ func (s *Schema) ValidateRecordWithWarnings(rec map[string]any) ([]string, error
 		}
 		if !contentSha256Re.MatchString(h) {
 			return nil, fmt.Errorf("schema: field \"content_sha256\" must be 64 lowercase hex characters")
+		}
+	}
+
+	// 16. SIM provenance/outcome fields (v0.3): optional strings with caps.
+	// A wrong type names the field; a too-long value is asked to abbreviate —
+	// problem is a grouping key, not prose.
+	for _, f := range simFields {
+		v, ok := rec[f]
+		if !ok || v == nil {
+			continue
+		}
+		sv, isStr := v.(string)
+		if !isStr {
+			return nil, fmt.Errorf("schema: field %q must be a string", f)
+		}
+		if max, hasCap := s.FieldMaxLength[f]; hasCap && max > 0 && len([]rune(sv)) > max {
+			return nil, fmt.Errorf("schema: field %q must be at most %d characters (got %d) — ย่อให้สั้นลง", f, max, len([]rune(sv)))
 		}
 	}
 

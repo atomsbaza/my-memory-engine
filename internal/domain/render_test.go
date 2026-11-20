@@ -64,7 +64,7 @@ func TestRenderContextSectionsAndBudgets(t *testing.T) {
 		t.Errorf("rules section must be truncated at its budget:\n%s", out)
 	}
 	if i := strings.Index(out, "## Rules"); i >= 0 {
-		section := out[i:strings.Index(out[i:], "\n\n## ")+i]
+		section := out[i : strings.Index(out[i:], "\n\n## ")+i]
 		if rlen(section) > 300+200 { // cap + block header/marker slack
 			t.Errorf("rules section = %d runes, budget cap is 300", rlen(section))
 		}
@@ -274,7 +274,6 @@ func TestRenderBlockBudgetCut(t *testing.T) {
 	if !strings.Contains(block, renderCutMarker) {
 		t.Fatalf("over-budget rules must carry the cut marker:\n%s", tail(block, 120))
 	}
-
 
 	// Control: a generous budget keeps both fixture rules intact.
 	full := RenderBlock(root, recs, AgentDef{Name: "fixture-agent", Mode: "render"}, 5000)

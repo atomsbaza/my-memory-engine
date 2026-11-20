@@ -1,6 +1,6 @@
 # mem command surface
 
-26 commands: 21 legacy Python families + `init` + `doctor` + `embed` + `links` + `graph`.
+27 commands: 21 legacy Python families + `init` + `doctor` + `embed` + `links` + `graph` + `outcome`.
 
 Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 
@@ -32,5 +32,6 @@ Generated from `cli.Manifest()` — edit internal/cli/cli.go, not this file.
 | `init` | `[PATH]` | สร้าง memory home ใหม่ (ไม่แตะ home เดิม) | engine |
 | `doctor` | `—` | ตรวจความสอดคล้อง file ↔ index ↔ remote | engine |
 | `embed` | `status | set <off|ollama> [--model M] [--base-url U]` | ดู/ตั้ง embedding mode (off = default, ollama = semantic search ท้องถิ่น) | engine |
+| `outcome` | `<id> [--fixed T] [--missed T] [--note T]` | บันทึกผลที่วัดได้ของ record (observed = fixed/missed/note — SIM predicted vs observed; ไม่แตะ uses) | engine |
 
 Exit codes: `0` success · `1` failed check/generic failure · `2` unsafe input or usage error · `3` conflict (dedup block, supersede misuse, sync rebase conflict).

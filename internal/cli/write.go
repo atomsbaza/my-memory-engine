@@ -38,6 +38,10 @@ func cmdAdd(e *Env, c command, argv []string) int {
 	expires := fs.String("expires", "none", "none | YYYY-MM-DD | +21d | +2w | +3m")
 	sensitivity := fs.String("sensitivity", "internal", "public | internal | private")
 	force := fs.Bool("force", false, "ข้าม dedup/id ซ้ำ (ของเดิมไม่ถูกเขียนทับ — ใช้ supersede)")
+	problem := fs.String("problem", "", "root-cause/grouping key ของ record (≤80 ตัวอักษร เช่น rate-limit-retry)")
+	predicted := fs.String("predicted", "", "สิ่งที่ record นี้คาดว่าจะแก้/ดีขึ้น — บันทึกตอนเขียน ก่อน verify (≤200)")
+	observed := fs.String("observed", "", "ผลที่วัดได้จริง (ปกติใช้ mem outcome ภายหลัง ไม่ใช่ตอน add)")
+	model := fs.String("model", "", "policy model/harness ที่ validate (≤40 เช่น claude, gemini, omp)")
 	noCommit := fs.Bool("no-commit", false, "เขียนไฟล์แต่ไม่ commit")
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
 		return code
@@ -77,6 +81,10 @@ func cmdAdd(e *Env, c command, argv []string) int {
 		Expires:     *expires,
 		Sensitivity: *sensitivity,
 		Force:       *force,
+		Problem:     *problem,
+		Predicted:   *predicted,
+		Observed:    *observed,
+		Model:       *model,
 		NoCommit:    *noCommit,
 	})
 	if err != nil {
@@ -185,6 +193,38 @@ func cmdCite(e *Env, c command, argv []string) int {
 		fmt.Fprintf(e.Stderr, "mem: %v\n", lerr)
 	}
 	fmt.Fprintln(e.Stdout, full)
+	return ExitOK
+}
+
+// cmdOutcome records the measured outcome of one record (v0.3 SIM batch):
+// observed = "fixed: …; missed: …; note: …", last_used bumped, uses NOT
+// touched (citing and measuring are different signals). Exit contract: 0
+// written, 1 id not found / too-long summary, 2 usage (no outcome part).
+func cmdOutcome(e *Env, c command, argv []string) int {
+	fs := e.flagSet(c)
+	fixed := fs.String("fixed", "", "อะไรที่ดีขึ้น/ผ่านหลังใช้ record นี้")
+	missed := fs.String("missed", "", "อะไรที่ยังพลาด/ไม่ดีขึ้น")
+	note := fs.String("note", "", "หมายเหตุการวัด (เช่น model, benchmark, round)")
+	args, code, stop := e.parseArgs(c, fs, argv)
+	if stop {
+		return code
+	}
+	if code, stop := e.needArgs(len(args), 1, "<id>"); stop {
+		return code
+	}
+	root, err := e.root()
+	if err != nil {
+		return e.fail(err)
+	}
+	full, observed, err := domain.Outcome(root, args[0], *fixed, *missed, *note)
+	if err != nil {
+		return e.fail(err)
+	}
+	row := map[string]any{"t": nowStamp(), "type": "outcome", "id": full, "agent": agentEnv(), "session": "-"}
+	if lerr := logEvent(root, row); lerr != nil {
+		fmt.Fprintf(e.Stderr, "mem: %v\n", lerr)
+	}
+	fmt.Fprintf(e.Stdout, "%s\t%s\n", full, observed)
 	return ExitOK
 }
 

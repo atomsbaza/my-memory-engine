@@ -3,3 +3,4 @@
 {"query": "why one go module for the engine", "expect": ["decision.face0003"], "origin": "authored"}
 {"query": "quantum chromodynamics lattice gauge renormalization group flow", "expect": [], "origin": "authored"}
 {"query": "FLRW metric dark energy equation of state w parameter", "expect": [], "origin": "authored"}
+{"query": "retry jitter exponential", "expect": ["lesson.face0005"], "stale": ["lesson.face0004"], "kind": "update", "origin": "authored", "note": "supersede chain: retrieval must surface the current record, not lesson.face0004"}

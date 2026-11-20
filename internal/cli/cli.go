@@ -46,14 +46,14 @@ const (
 	// LegacyCommandCount is the Python baseline's add_parser count.
 	LegacyCommandCount = 21
 	// CommandCount is the full surface: 21 legacy families + init + doctor
-	// + embed + links + graph (both explorers are engine-only additive
-	// surfaces).
-	CommandCount = LegacyCommandCount + 5
+	// + embed + links + graph + outcome (the SIM measured-outcome verb;
+	// both explorers and outcome are engine-only additive surfaces).
+	CommandCount = LegacyCommandCount + 6
 )
 
 // usage is the top-level usage line; mirrors Python mem's argparse banner with
 // the engine-only commands appended.
-const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,links,graph,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed} ..."
+const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,links,graph,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed,outcome} ..."
 
 // banner is the one-line description printed under usage.
 const banner = "portable agent memory (markdown + git)"
@@ -85,8 +85,8 @@ type Env struct {
 	Stderr io.Writer
 }
 
-// commands is the 26-command registry: the 21 legacy families in Python mem's
-// order, then the five engine-only commands.
+// commands is the 27-command registry: the 21 legacy families in Python mem's
+// order, then the six engine-only commands.
 var commands = []command{
 	{Entry: Entry{Name: "context", Args: "[--project P] [--scope S] [--query Q] [--budget N] [--no-touch] [--quiet]", Help: "ดึงความจำที่เกี่ยวข้องกับงาน", Legacy: true}, run: cmdContext},
 	{Entry: Entry{Name: "search", Args: "<query> [--scope S] [--layer L]... [--limit N] [--all] [--scores]", Help: "ค้น record", Legacy: true}, run: cmdSearch},
@@ -114,6 +114,7 @@ var commands = []command{
 	{Entry: Entry{Name: "init", Args: "[PATH]", Help: "สร้าง memory home ใหม่ (ไม่แตะ home เดิม)"}, run: cmdInit},
 	{Entry: Entry{Name: "doctor", Args: "", Help: "ตรวจความสอดคล้อง file ↔ index ↔ remote"}, run: cmdDoctor},
 	{Entry: Entry{Name: "embed", Args: "status | set <off|ollama> [--model M] [--base-url U]", Help: "ดู/ตั้ง embedding mode (off = default, ollama = semantic search ท้องถิ่น)"}, run: cmdEmbed},
+	{Entry: Entry{Name: "outcome", Args: "<id> [--fixed T] [--missed T] [--note T]", Help: "บันทึกผลที่วัดได้ของ record (observed = fixed/missed/note — SIM predicted vs observed; ไม่แตะ uses)"}, run: cmdOutcome},
 }
 
 // Manifest returns the command surface in registry order. Exported for the

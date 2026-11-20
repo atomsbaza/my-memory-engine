@@ -87,8 +87,11 @@ func TestEvalRunMetricsAndBaseline(t *testing.T) {
 	if res.Metrics.Recall5 != 1.0 || res.Metrics.MRR != 1.0 {
 		t.Fatalf("fixture metrics = recall %v mrr %v, want 1/1", res.Metrics.Recall5, res.Metrics.MRR)
 	}
-	if res.Metrics.NPairs != 3 || res.Metrics.Stale != 0 {
-		t.Fatalf("n_pairs = %d stale = %d, want 3/0", res.Metrics.NPairs, res.Metrics.Stale)
+	if res.Metrics.NPairs != 4 || res.Metrics.Stale != 0 {
+		t.Fatalf("n_pairs = %d stale = %d, want 4/0", res.Metrics.NPairs, res.Metrics.Stale)
+	}
+	if res.Metrics.UpdateTotal != 1 || res.Metrics.UpdatePass != 1 || res.Metrics.UpdateAccuracy != 1.0 {
+		t.Fatalf("update = %d/%d (%v), want 1/1 (1.0)", res.Metrics.UpdatePass, res.Metrics.UpdateTotal, res.Metrics.UpdateAccuracy)
 	}
 	if _, err := os.Stat(filepath.Join(root, "eval", "baseline.json")); err != nil {
 		t.Fatalf("baseline must be written: %v", err)
@@ -103,8 +106,8 @@ func TestEvalRunMetricsAndBaseline(t *testing.T) {
 		t.Fatalf("verdict = %q fails = %v", res.Verdict, res.Fails)
 	}
 	// Sweep: every expect id scored ≥ 7 at the 5.0-threshold sweep.
-	if res.Metrics.SweepGE["7.0"] != 3 {
-		t.Fatalf("sweep >=7.0 = %d, want 3 (metrics %v)", res.Metrics.SweepGE["7.0"], res.Metrics)
+	if res.Metrics.SweepGE["7.0"] != 4 {
+		t.Fatalf("sweep >=7.0 = %d, want 4 (metrics %v)", res.Metrics.SweepGE["7.0"], res.Metrics)
 	}
 }
 
@@ -116,7 +119,7 @@ func TestEvalRegressionFailsGate(t *testing.T) {
 	}
 
 	// Degrade one lesson so its query no longer matches: recall drops to
-	// 2/3 ≈ 0.6667 — more than 0.05 under the 1.0 baseline.
+	// 3/4 = 0.75 — more than 0.05 under the 1.0 baseline.
 	//
 	// The control has to remove the title overlap too. score() gives layer 3.0
 	// plus 4.0 per title token, and the fixture title shares "go" with the
@@ -153,8 +156,8 @@ func TestEvalRegressionFailsGate(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Fails, " · "), "recall@5") {
 		t.Fatalf("fails should name the recall regression: %v", res.Fails)
 	}
-	if res.Metrics.Recall5 > 0.67 {
-		t.Fatalf("degraded recall = %v, want ≈ 0.6667", res.Metrics.Recall5)
+	if res.Metrics.Recall5 > 0.75 {
+		t.Fatalf("degraded recall = %v, want ≈ 0.75", res.Metrics.Recall5)
 	}
 }
 
@@ -175,9 +178,9 @@ func TestEvalAbstentionPairs(t *testing.T) {
 	if res.Metrics.AbstentionPrecision != 1.0 {
 		t.Fatalf("abstention precision = %v, want 1.0", res.Metrics.AbstentionPrecision)
 	}
-	// Abstention pairs stay out of the retrieval math: same 3 live pairs.
-	if res.Metrics.NPairs != 3 || res.Metrics.Stale != 0 {
-		t.Fatalf("n_pairs = %d stale = %d, want 3/0 (metrics %v)", res.Metrics.NPairs, res.Metrics.Stale, res.Metrics)
+	// Abstention pairs stay out of the retrieval math: same 4 live pairs.
+	if res.Metrics.NPairs != 4 || res.Metrics.Stale != 0 {
+		t.Fatalf("n_pairs = %d stale = %d, want 4/0 (metrics %v)", res.Metrics.NPairs, res.Metrics.Stale, res.Metrics)
 	}
 	if res.Metrics.Recall5 != 1.0 || res.Metrics.MRR != 1.0 {
 		t.Fatalf("recall math changed: recall %v mrr %v", res.Metrics.Recall5, res.Metrics.MRR)
@@ -301,8 +304,8 @@ func TestEvalStalePairsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Metrics.Stale != 1 || res.Metrics.NPairs != 2 {
-		t.Fatalf("stale = %d n = %d, want 1/2 (metrics %v)", res.Metrics.Stale, res.Metrics.NPairs, res.Metrics)
+	if res.Metrics.Stale != 1 || res.Metrics.NPairs != 3 {
+		t.Fatalf("stale = %d n = %d, want 1/3 (metrics %v)", res.Metrics.Stale, res.Metrics.NPairs, res.Metrics)
 	}
 	if res.Metrics.Recall5 != 1.0 {
 		t.Fatalf("live pairs still perfect, recall = %v", res.Metrics.Recall5)
@@ -403,5 +406,111 @@ func TestEvalNoiseFromLog(t *testing.T) {
 	// No inject rows → n/a (nil), never a crash.
 	if noise, _, _, _ := evalNoise([]logRow{{"type": "cite", "id": "x"}}); noise != nil {
 		t.Fatalf("noise without injects = %v, want nil", noise)
+	}
+}
+
+// --- SIM update pairs (v0.3 kind:"update" + stale) ---------------------------
+
+// TestEvalUpdatePairs: the fixture's supersede chain pair counts as live for
+// recall/MRR AND must satisfy the stricter update rule — current surfaces,
+// superseded twin absent — with the counts carried into the saved baseline.
+func TestEvalUpdatePairs(t *testing.T) {
+	root := copyEvalHome(t)
+	rebuildIndex(t, root)
+
+	res, err := Run(root, Options{SaveBaseline: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Metrics.UpdateTotal != 1 || res.Metrics.UpdatePass != 1 {
+		t.Fatalf("update = %d/%d, want 1/1 (metrics %v)", res.Metrics.UpdatePass, res.Metrics.UpdateTotal, res.Metrics)
+	}
+	if res.Metrics.UpdateAccuracy != 1.0 {
+		t.Fatalf("update accuracy = %v, want 1.0", res.Metrics.UpdateAccuracy)
+	}
+	bm, err := LoadBaseline(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bm.Metrics.UpdateTotal != 1 || bm.Metrics.UpdateAccuracy != 1.0 {
+		t.Fatalf("baseline update = %d/%v, want 1/1.0", bm.Metrics.UpdateTotal, bm.Metrics.UpdateAccuracy)
+	}
+
+	// A baseline saved before the update fields still loads and still gates
+	// (missing update_total reads as 0 pairs).
+	bp := filepath.Join(root, "eval", "baseline.json")
+	data, err := os.ReadFile(bp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	m := doc["metrics"].(map[string]any)
+	delete(m, "update_pass")
+	delete(m, "update_total")
+	delete(m, "update_accuracy")
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bp, append(out, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err = Run(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "PASS" || len(res.Fails) != 0 {
+		t.Fatalf("legacy baseline verdict = %q fails = %v", res.Verdict, res.Fails)
+	}
+}
+
+// TestEvalUpdateStaleSurfacedFails: the discriminating negative control — a
+// kind:update pair whose stale id STILL lands in the top-k fails the whole
+// verdict even though the expected record is found and recall/MRR are perfect.
+// Retrieval never returns inactive records by default (SelectFrom drops them
+// before scoring), so the control lists a retrieved ACTIVE decoy as the stale
+// id: "go git branch" surfaces both lesson.face0001 (expected) and
+// lesson.face0002 (listed stale) — exactly the shape a future regression
+// (e.g. an include-inactive knob leaking into retrieval, or a supersede
+// rewrite that forgot the status flip) would produce.
+func TestEvalUpdateStaleSurfacedFails(t *testing.T) {
+	root := copyEvalHome(t)
+	rebuildIndex(t, root)
+	if _, err := Run(root, Options{SaveBaseline: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Append the control pair: expected id IS retrieved, but so is the stale id.
+	golden := filepath.Join(root, "eval", "golden.jsonl")
+	f, err := os.OpenFile(golden, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("{\"query\": \"go git branch\", \"expect\": [\"lesson.face0001\"], \"stale\": [\"lesson.face0002\"], \"kind\": \"update\", \"origin\": \"authored\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	res, err := Run(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "FAIL" {
+		t.Fatalf("verdict = %q, want FAIL (metrics %v)", res.Verdict, res.Metrics)
+	}
+	if !strings.Contains(strings.Join(res.Fails, " · "), "update accuracy") {
+		t.Fatalf("fails should name the update miss: %v", res.Fails)
+	}
+	if res.Metrics.UpdateTotal != 2 || res.Metrics.UpdatePass != 1 || res.Metrics.UpdateAccuracy != 0.5 {
+		t.Fatalf("update = %d/%d (%v), want 1/2 (0.5)", res.Metrics.UpdatePass, res.Metrics.UpdateTotal, res.Metrics.UpdateAccuracy)
+	}
+	// The expected record was found (recall stays perfect; MRR only dips
+	// because the decoy outranks it) — the failure is exclusively the
+	// surfaced stale id, not a retrieval miss.
+	if res.Metrics.Recall5 != 1.0 || res.Metrics.MRR < 0.9 {
+		t.Fatalf("recall math changed: recall %v mrr %v", res.Metrics.Recall5, res.Metrics.MRR)
 	}
 }

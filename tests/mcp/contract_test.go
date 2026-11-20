@@ -365,7 +365,8 @@ func TestStdioPurity(t *testing.T) {
 }
 
 // TestToolsListFrozenContract: the served tools/list is the frozen 13-tool
-// document — same names, descriptions and input schemas as the baseline.
+// document plus the engine-only additive tools — same names, descriptions and
+// input schemas as their snapshots (v0.3: 13 frozen + memory_outcome).
 func TestToolsListFrozenContract(t *testing.T) {
 	home := fixtureHome(t)
 	s := runMCP(t, home, append(initialize(), request(2, "tools/list", nil))...)
@@ -386,18 +387,36 @@ func TestToolsListFrozenContract(t *testing.T) {
 	if err := json.Unmarshal(memconf.FrozenToolsJSON(), &frozen); err != nil {
 		t.Fatalf("parse embedded frozen snapshot: %v", err)
 	}
-	if len(res.Tools) != 13 {
-		t.Fatalf("tools/list returned %d tools, want 13", len(res.Tools))
+	var additive []struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		InputSchema json.RawMessage `json:"inputSchema"`
 	}
-	if len(frozen) != len(res.Tools) {
-		t.Fatalf("frozen snapshot has %d tools, served %d", len(frozen), len(res.Tools))
+	if err := json.Unmarshal(memconf.AdditiveToolsJSON(), &additive); err != nil {
+		t.Fatalf("parse embedded additive snapshot: %v", err)
+	}
+	if len(frozen) != 13 {
+		t.Fatalf("frozen snapshot has %d tools, want 13", len(frozen))
+	}
+	wantTotal := len(frozen) + len(additive)
+	if len(res.Tools) != wantTotal {
+		names := make([]string, len(res.Tools))
+		for i, tool := range res.Tools {
+			names[i] = tool.Name
+		}
+		t.Fatalf("tools/list returned %d tools (%v), want %d (13 frozen + %d additive)",
+			len(res.Tools), names, wantTotal, len(additive))
 	}
 
 	served := make(map[string]int, len(res.Tools))
 	for i, tool := range res.Tools {
 		served[tool.Name] = i
 	}
-	for _, want := range frozen {
+	for _, want := range append(append([]struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}(nil), frozen...), additive...) {
 		i, ok := served[want.Name]
 		if !ok {
 			t.Errorf("tool %q is missing from tools/list", want.Name)
@@ -408,8 +427,50 @@ func TestToolsListFrozenContract(t *testing.T) {
 			t.Errorf("%s: description drifted\n got: %q\nwant: %q", want.Name, got.Description, want.Description)
 		}
 		if !sameJSON(t, got.InputSchema, want.InputSchema) {
-			t.Errorf("%s: inputSchema drifted from the frozen snapshot\n got: %s\nwant: %s",
+			t.Errorf("%s: inputSchema drifted from its snapshot\n got: %s\nwant: %s",
 				want.Name, got.InputSchema, want.InputSchema)
+		}
+	}
+}
+
+// TestMemoryOutcomeOverStdio: the additive tool answers a real call over the
+// wire — the observed summary lands in the record file and uses stays put.
+// The home is a git repo because outcome (like review) commits the write.
+func TestMemoryOutcomeOverStdio(t *testing.T) {
+	home := fixtureHome(t)
+	cmd := exec.Command("git", "-C", home, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init fixture home: %v: %s", err, out)
+	}
+	r := callTool(t, home, "memory_outcome", map[string]any{
+		"id": "rule.aaaa0001", "fixed": "suite ผ่านครบ", "note": "omp",
+	})
+	if r.IsError {
+		t.Fatalf("memory_outcome over stdio failed: %s", r.text())
+	}
+	if !strings.HasPrefix(r.text(), "rule.aaaa0001\t") {
+		t.Fatalf("memory_outcome text = %q, want id + observed", r.text())
+	}
+	data, err := os.ReadFile(filepath.Join(home, "rules", "always-verify-on-disk-rule.aaaa0001.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `observed: "fixed: suite ผ่านครบ; note: omp"`) {
+		t.Fatalf("observed missing from record:\n%s", data)
+	}
+	if strings.Contains(string(data), "uses: ") {
+		t.Fatalf("outcome must not write uses:\n%s", data)
+	}
+
+	// The handshake carries the SIM rules block.
+	s := runMCP(t, home, initialize()...)
+	var init struct {
+		Instructions string `json:"instructions"`
+	}
+	s.result(t, 1, &init)
+	for _, want := range []string{"prior experience", "provenance", "diagnosis เดิม", "re-assess", "supersede", "revisit", "อธิบายปัญหาใหม่ไม่ได้", "task-specific evidence", "memory_outcome"} {
+		if !strings.Contains(init.Instructions, want) {
+			t.Errorf("wire instructions missing SIM marker %q", want)
 		}
 	}
 }

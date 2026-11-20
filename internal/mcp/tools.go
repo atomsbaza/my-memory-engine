@@ -432,6 +432,30 @@ func (s *server) handleCite(_ context.Context, _ *mcpsdk.CallToolRequest, in Cit
 }
 
 // ---------------------------------------------------------------------------
+// memory_outcome — SIM measured outcome (engine-only additive tool)
+// ---------------------------------------------------------------------------
+
+// handleOutcome records the measured outcome of using one record: the
+// observed front-matter field (the "observed" half of predicted-vs-observed,
+// arXiv:2611.18856). uses is deliberately untouched — cite (memory_cite)
+// counts that the record changed a decision, outcome records what happened
+// next; merging the two would inflate usage with measurements.
+func (s *server) handleOutcome(_ context.Context, _ *mcpsdk.CallToolRequest, in OutcomeArgs) (*mcpsdk.CallToolResult, any, error) {
+	if in.ID == "" {
+		return result("", "ต้องส่ง id", true)
+	}
+	full, observed, err := domain.Outcome(s.root, in.ID, in.Fixed, in.Missed, in.Note)
+	if err != nil {
+		return result("", err.Error(), true)
+	}
+	s.logEvent(map[string]any{
+		"t": nowStamp(), "type": "outcome", "id": full,
+		"agent": s.agentRow(), "session": "-",
+	})
+	return result(full+"\t"+observed, "", false)
+}
+
+// ---------------------------------------------------------------------------
 // memory_add
 // ---------------------------------------------------------------------------
 

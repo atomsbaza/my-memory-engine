@@ -99,6 +99,17 @@ type AddOptions struct {
 	Expires     string // none | YYYY-MM-DD | +21d | +2w | +3m
 	Sensitivity string // default "internal"
 	Force       bool
+
+	// SIM provenance/outcome fields (v0.3, arXiv:2611.18856): problem is the
+	// root-cause grouping key, predicted the pre-verification prediction
+	// written at add time, observed the post-use measured summary (usually
+	// written later by Outcome, not Add), model the policy-model provenance.
+	// All optional, all strings; schema caps their lengths.
+	Problem   string
+	Predicted string
+	Observed  string
+	Model     string
+
 	// NoCommit writes the record without the local git commit (the CLI's
 	// `mem add --no-commit`). The record still lands on disk.
 	NoCommit bool
@@ -404,6 +415,18 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	}
 	if opts.Session != "" {
 		fm["session"] = opts.Session
+	}
+	if opts.Problem != "" {
+		fm["problem"] = opts.Problem
+	}
+	if opts.Predicted != "" {
+		fm["predicted"] = opts.Predicted
+	}
+	if opts.Observed != "" {
+		fm["observed"] = opts.Observed
+	}
+	if opts.Model != "" {
+		fm["model"] = opts.Model
 	}
 	if target != nil {
 		fm["supersedes"] = target.ID

@@ -545,3 +545,71 @@ func TestContentSHAProperty(t *testing.T) {
 		}
 	}
 }
+
+// --- ValidateRecord: SIM fields (v0.3 problem/predicted/observed/model) -----
+
+func TestValidateRecord_SIMFieldsAccepted(t *testing.T) {
+	s, _ := LoadSchema("")
+	rec := validRecord("lesson")
+	rec["problem"] = "rate-limit-retry"
+	rec["predicted"] = "backoff จะลด failed call ลงครึ่งหนึ่ง"
+	rec["observed"] = "fixed: failed เหลือ 4%; note: วัดบน omp"
+	rec["model"] = "omp"
+	if err := s.ValidateRecord(rec); err != nil {
+		t.Fatalf("SIM fields rejected: %v", err)
+	}
+}
+
+func TestValidateRecord_SIMFieldsWrongType(t *testing.T) {
+	s, _ := LoadSchema("")
+	for _, f := range []string{"problem", "predicted", "observed", "model"} {
+		rec := validRecord("lesson")
+		rec[f] = 42
+		err := s.ValidateRecord(rec)
+		if err == nil {
+			t.Errorf("%s: expected type error, got nil", f)
+			continue
+		}
+		if !strings.Contains(err.Error(), f) {
+			t.Errorf("%s: error should name the field, got: %v", f, err)
+		}
+	}
+}
+
+func TestValidateRecord_SIMFieldsTooLong(t *testing.T) {
+	s, _ := LoadSchema("")
+	cases := map[string]int{"problem": 81, "predicted": 201, "observed": 201, "model": 41}
+	for f, n := range cases {
+		rec := validRecord("lesson")
+		rec[f] = strings.Repeat("x", n)
+		err := s.ValidateRecord(rec)
+		if err == nil {
+			t.Errorf("%s at %d runes: expected cap error, got nil", f, n)
+			continue
+		}
+		if !strings.Contains(err.Error(), f) || !strings.Contains(err.Error(), "ย่อ") {
+			t.Errorf("%s: error should name the field and suggest abbreviating, got: %v", f, err)
+		}
+	}
+	// Exactly at the cap is fine.
+	rec := validRecord("lesson")
+	rec["problem"] = strings.Repeat("x", 80)
+	if err := s.ValidateRecord(rec); err != nil {
+		t.Errorf("problem at exactly 80 runes rejected: %v", err)
+	}
+}
+
+// A record.schema.json maxLength on a SIM field overrides the portable cap.
+func TestValidateRecord_SIMFieldCapOverride(t *testing.T) {
+	s := Defaults()
+	s.FieldMaxLength["model"] = 8
+	rec := validRecord("lesson")
+	rec["model"] = "claude" // 6 ≤ 8
+	if err := s.ValidateRecord(rec); err != nil {
+		t.Fatalf("model within overridden cap rejected: %v", err)
+	}
+	rec["model"] = "gemini-flash" // 12 > 8
+	if err := s.ValidateRecord(rec); err == nil {
+		t.Fatal("model past overridden cap accepted")
+	}
+}

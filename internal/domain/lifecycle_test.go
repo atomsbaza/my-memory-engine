@@ -40,8 +40,6 @@ func TestSupersedeChain(t *testing.T) {
 		t.Fatalf("l3 supersedes = %q, want %q", s, l2.ID)
 	}
 
-
-
 	if err := Supersede(root, "lesson.deadbeef", l3.ID); err == nil ||
 		!strings.Contains(err.Error(), "ไม่พบ old record") {
 		t.Fatalf("missing old must fail loudly, got %v", err)
@@ -215,5 +213,78 @@ func TestReindexAfterMutation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".memory")); err != nil {
 		t.Fatalf("index directory must exist: %v", err)
+	}
+}
+
+// --- Outcome (v0.3 SIM measured-outcome verb) -------------------------------
+
+func TestOutcomeWritesObservedNotUses(t *testing.T) {
+	root := copyHome(t)
+	gitInit(t, root)
+	id := "lesson.bbbb0001"
+
+	full, observed, err := Outcome(root, id, "failed เหลือ 4%", "p99 ยังช้า", "วัดบน omp")
+	if err != nil {
+		t.Fatalf("outcome: %v", err)
+	}
+	if full != id {
+		t.Fatalf("outcome returned %q, want %q", full, id)
+	}
+	want := "fixed: failed เหลือ 4%; missed: p99 ยังช้า; note: วัดบน omp"
+	if observed != want {
+		t.Fatalf("observed = %q, want %q", observed, want)
+	}
+	rec := recByID(t, root, id)
+	if got := strField(rec.Front, "observed"); got != want {
+		t.Fatalf("observed front-matter = %q, want %q", got, want)
+	}
+	if got := strField(rec.Front, "last_used"); got != today() {
+		t.Fatalf("last_used = %q, want today %q", got, today())
+	}
+	if rec.Uses != 0 {
+		t.Fatalf("uses = %d, want 0 — outcome must not bump uses (cite owns that)", rec.Uses)
+	}
+
+	// A second outcome replaces the summary with the latest measurement and
+	// still leaves uses alone.
+	if _, _, err := Outcome(root, id, "", "", "re-measured: ดีขึ้น"); err != nil {
+		t.Fatalf("second outcome: %v", err)
+	}
+	rec = recByID(t, root, id)
+	if got := strField(rec.Front, "observed"); got != "note: re-measured: ดีขึ้น" {
+		t.Fatalf("observed after re-measure = %q", got)
+	}
+	if rec.Uses != 0 {
+		t.Fatalf("uses after second outcome = %d, want 0", rec.Uses)
+	}
+
+	// Unknown id and ambiguous prefix stay loud; no part is a usage error.
+	if _, _, err := Outcome(root, "ffff0001", "x", "", ""); err == nil {
+		t.Fatal("unknown id must fail")
+	}
+}
+
+func TestOutcomeRequiresAPart(t *testing.T) {
+	root := copyHome(t)
+	gitInit(t, root)
+	_, _, err := Outcome(root, "lesson.bbbb0001", "  ", "", "")
+	if err == nil {
+		t.Fatal("empty fixed/missed/note must be refused")
+	}
+	if code, ok := AsError(err); !ok || code != 2 {
+		t.Fatalf("empty outcome parts: exit code = %d ok=%v, want usage 2", code, ok)
+	}
+}
+
+func TestOutcomeRejectsOverlongSummary(t *testing.T) {
+	root := copyHome(t)
+	gitInit(t, root)
+	long := strings.Repeat("x", 201)
+	_, _, err := Outcome(root, "lesson.bbbb0001", long, "", "")
+	if err == nil {
+		t.Fatal("over-long observed must be refused, not silently truncated")
+	}
+	if !strings.Contains(err.Error(), "200") {
+		t.Fatalf("error should name the cap, got: %v", err)
 	}
 }

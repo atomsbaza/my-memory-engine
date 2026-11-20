@@ -182,8 +182,9 @@ func TestInstructionsShape(t *testing.T) {
 	}
 }
 
-// TestToolsListMatchesFrozenSnapshot: tools/list must be the frozen document —
-// same 13 names in registry order, same descriptions, same input schemas.
+// TestToolsListMatchesFrozenSnapshot: tools/list must be the frozen document
+// plus the engine-only additive tools — same 13 frozen names in registry
+// order, same descriptions, same input schemas, then the additive set.
 func TestToolsListMatchesFrozenSnapshot(t *testing.T) {
 	cs := newSession(t, fixtureHome(t, false))
 	res, err := cs.ListTools(context.Background(), nil)
@@ -194,19 +195,27 @@ func TestToolsListMatchesFrozenSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("frozen tools: %v", err)
 	}
-	if len(res.Tools) != len(frozen) || len(frozen) != 13 {
+	additive, err := additiveTools()
+	if err != nil {
+		t.Fatalf("additive tools: %v", err)
+	}
+	wantTotal := len(frozen) + len(additive)
+	if len(frozen) != 13 || len(additive) != 1 || len(res.Tools) != wantTotal {
 		names := make([]string, len(res.Tools))
 		for i, tool := range res.Tools {
 			names[i] = tool.Name
 		}
-		t.Fatalf("tools/list returned %d tools (%v), want %d", len(res.Tools), names, len(frozen))
+		t.Fatalf("tools/list returned %d tools (%v), want %d (13 frozen + %d additive)",
+			len(res.Tools), names, wantTotal, len(additive))
 	}
 
+	// The served set is exactly frozen ∪ additive, each byte-equal to its
+	// snapshot (the SDK returns tools in its own order, so match by name).
 	emitted := make(map[string]*mcpsdk.Tool, len(res.Tools))
 	for _, tool := range res.Tools {
 		emitted[tool.Name] = tool
 	}
-	for _, want := range frozen {
+	for _, want := range append(append([]frozenTool(nil), frozen...), additive...) {
 		got, ok := emitted[want.Name]
 		if !ok {
 			t.Errorf("tool %q missing from tools/list", want.Name)
@@ -220,7 +229,48 @@ func TestToolsListMatchesFrozenSnapshot(t *testing.T) {
 			t.Fatalf("%s: marshal emitted schema: %v", want.Name, err)
 		}
 		if !jsonEqual(t, gotSchema, want.InputSchema) {
-			t.Errorf("%s: inputSchema drifted from the frozen snapshot", want.Name)
+			t.Errorf("%s: inputSchema drifted from its snapshot", want.Name)
+		}
+	}
+}
+
+// TestAdditiveToolContract pins the engine-only additive tool surface
+// independently of the snapshot file: memory_outcome requires id, exposes
+// fixed/missed/note, and never adds required fields to the frozen 13.
+func TestAdditiveToolContract(t *testing.T) {
+	additive, err := additiveTools()
+	if err != nil {
+		t.Fatalf("additive tools: %v", err)
+	}
+	if len(additive) != 1 || additive[0].Name != "memory_outcome" {
+		t.Fatalf("additive snapshot = %v, want exactly [memory_outcome]", additive)
+	}
+	var schema struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(additive[0].InputSchema, &schema); err != nil {
+		t.Fatalf("parse additive schema: %v", err)
+	}
+	if !slices.Equal(schema.Required, []string{"id"}) {
+		t.Errorf("memory_outcome required = %v, want [id]", schema.Required)
+	}
+	for _, prop := range []string{"id", "fixed", "missed", "note"} {
+		if _, ok := schema.Properties[prop]; !ok {
+			t.Errorf("memory_outcome lost argument %q", prop)
+		}
+	}
+	if len(schema.Properties) != 4 {
+		t.Errorf("memory_outcome has unknown arguments: %v", schema.Properties)
+	}
+	// Additive names never collide with the frozen set.
+	frozen, err := frozenTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range frozen {
+		if f.Name == "memory_outcome" {
+			t.Fatalf("memory_outcome must live in the additive snapshot, not the frozen one")
 		}
 	}
 }
@@ -869,5 +919,80 @@ func TestMemoryAddIdempotent(t *testing.T) {
 	}
 	if got := countMD(); got != before {
 		t.Errorf("identical re-add changed the file count: %d -> %d", before, got)
+	}
+}
+
+// TestInstructionsSIMRules: the handshake carries the 8 SIM usage rules
+// (arXiv:2611.18856 D.2) and names the SIM fields + memory_outcome.
+func TestInstructionsSIMRules(t *testing.T) {
+	got := instructions("/tmp/not-under-home", "")
+	rules := []string{
+		"prior experience", // 1
+		"provenance",       // 2 (source:/model:/scope:)
+		"diagnosis เดิม",   // 3
+		"re-assess",        // 4
+		"supersede",        // 5
+		"revisit",          // 6
+		"อธิบายปัญหาใหม่ไม่ได้", // 7
+		"task-specific evidence", // 8
+	}
+	for i, want := range rules {
+		if !strings.Contains(got, want) {
+			t.Errorf("SIM rule %d missing %q from instructions:\n%s", i+1, want, got)
+		}
+	}
+	for _, want := range []string{"`problem`", "`predicted`", "observed", "`model`", "memory_outcome", "arXiv:2611.18856"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("instructions missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMemoryOutcomeWired: memory_outcome writes the observed summary, bumps
+// last_used, and deliberately leaves uses alone (cite owns that counter).
+func TestMemoryOutcomeWired(t *testing.T) {
+	root := fixtureHome(t, false)
+	cs := newSession(t, root)
+
+	// Cite once so the record has a non-zero uses baseline.
+	if _, isErr := callTool(t, cs, "memory_cite", map[string]any{"id": "rule.aaaa0001"}); isErr {
+		t.Fatal("cite failed")
+	}
+
+	text, isErr := callTool(t, cs, "memory_outcome", map[string]any{
+		"id": "rule.aaaa0001", "fixed": "flake หาย", "missed": "p99 ยังช้า",
+	})
+	if isErr {
+		t.Fatalf("memory_outcome returned an error: %s", text)
+	}
+	if !strings.HasPrefix(text, "rule.aaaa0001\t") || !strings.Contains(text, "fixed: flake หาย") {
+		t.Fatalf("memory_outcome output = %q, want id + observed summary", text)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "rules", "always-verify-on-disk-rule.aaaa0001.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileText := string(data)
+	for _, want := range []string{
+		`observed: "fixed: flake หาย; missed: p99 ยังช้า"`,
+		"uses: 1", // unchanged by outcome
+	} {
+		if !strings.Contains(fileText, want) {
+			t.Errorf("record file missing %q:\n%s", want, fileText)
+		}
+	}
+
+	log, err := os.ReadFile(filepath.Join(root, "ops", "recall-log.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), `"type":"outcome"`) {
+		t.Errorf("recall log has no outcome row:\n%s", log)
+	}
+
+	// Negative: no outcome part is a loud refusal, not a silent no-op.
+	if _, isErr := callTool(t, cs, "memory_outcome", map[string]any{"id": "rule.aaaa0001"}); !isErr {
+		t.Error("memory_outcome without fixed/missed/note must fail")
 	}
 }

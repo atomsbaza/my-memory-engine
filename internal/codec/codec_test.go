@@ -130,6 +130,51 @@ sensitivity: internal
 Knowledge body.
 `
 
+// fixtureSIMFields carries the four SIM fields (v0.3, arXiv:2611.18856):
+// problem/predicted written at add time, observed written later by
+// mem outcome, model the policy-model provenance (synthetic).
+const fixtureSIMFields = `---
+id: lesson.feed0007
+title: sim fields fixture
+layer: lesson
+scope: codec-test
+tags: [sim]
+created: 2026-05-01
+last_used: 2026-05-02
+uses: 2
+successes: 2
+problem: rate-limit-retry
+predicted: backoff จะลด failed call ลงครึ่งหนึ่ง
+observed: "fixed: failed เหลือ 4%; missed: p99 ยังช้า; note: วัดบน omp"
+model: omp
+expires: none
+status: active
+sensitivity: internal
+---
+
+Rule body.
+`
+
+// fixtureSIMFieldsQuoted has predicted text that needs quoting (colon+space).
+const fixtureSIMFieldsQuoted = `---
+id: lesson.feed0008
+title: sim quoted fixture
+layer: lesson
+scope: codec-test
+tags: [sim]
+created: 2026-05-03
+uses: 1
+successes: 1
+problem: premature-completion
+predicted: "ตรวจ suite ก่อน: ลดการอ้างว่าเสร็จ"
+model: claude
+status: active
+sensitivity: internal
+---
+
+Rule body.
+`
+
 // ---------------------------------------------------------------------------
 // TestScaffold (kept for backwards compat)
 // ---------------------------------------------------------------------------
@@ -377,6 +422,45 @@ func TestRoundtrip_ExtraKeys(t *testing.T) {
 
 func TestRoundtrip_EmptyTags(t *testing.T) {
 	roundtrip(t, fixtureEmptyTags)
+}
+
+func TestRoundtrip_SIMFields(t *testing.T) {
+	roundtrip(t, fixtureSIMFields)
+}
+
+func TestRoundtrip_SIMFieldsQuoted(t *testing.T) {
+	roundtrip(t, fixtureSIMFieldsQuoted)
+}
+
+// TestDumpFront_SIMFieldsAfterSuccesses: the four SIM fields dump in
+// FRONT_ORDER between successes and expires — their canonical position.
+func TestDumpFront_SIMFieldsAfterSuccesses(t *testing.T) {
+	fm, _ := mustParse(t, fixtureSIMFields)
+	out := DumpFront(fm)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	pos := func(prefix string) int {
+		for i, l := range lines {
+			if strings.HasPrefix(l, prefix+":") {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, k := range []string{"problem", "predicted", "observed", "model"} {
+		if pos(k) < 0 {
+			t.Fatalf("%s missing from dump:\n%s", k, out)
+		}
+	}
+	if !(pos("successes") < pos("problem") && pos("problem") < pos("predicted") &&
+		pos("predicted") < pos("observed") && pos("observed") < pos("model") &&
+		pos("model") < pos("expires")) {
+		t.Errorf("SIM fields must dump after successes, before expires: successes=%d problem=%d predicted=%d observed=%d model=%d expires=%d",
+			pos("successes"), pos("problem"), pos("predicted"), pos("observed"), pos("model"), pos("expires"))
+	}
+	// The quoted observed survives byte-exact.
+	if !strings.Contains(out, `observed: "fixed: failed เหลือ 4%; missed: p99 ยังช้า; note: วัดบน omp"`) {
+		t.Errorf("observed line drifted:\n%s", out)
+	}
 }
 
 // Mutation test: changing a field value must break the original round-trip equality.

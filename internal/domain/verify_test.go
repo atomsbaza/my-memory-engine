@@ -229,3 +229,66 @@ func TestVerifyConfidenceWithoutEvidence(t *testing.T) {
 		}
 	}
 }
+
+// --- SIM predicted-vs-observed warnings (v0.3) -------------------------------
+
+func TestVerifyPredictedWithoutObserved(t *testing.T) {
+	root := copyHome(t)
+
+	// A predicted lesson used >= 3 times without a measured observed warns.
+	writeRecFile(t, root, "lesson", "lesson.bbbb0020", "predicted never measured",
+		"claim with a prediction\n**NOT.** guess\n"+provenanceMarker,
+		func(fm codec.Frontmatter) {
+			fm["predicted"] = "จะลด flaky test ลงครึ่ง"
+			fm["uses"] = 3
+		})
+	_, warnings, err := Verify(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMsg(warnings, "predicted ยังไม่ถูกตรวจ") || !hasMsg(warnings, "mem outcome") {
+		t.Fatalf("predicted-without-observed warning missing: %v", warnings)
+	}
+
+	// Controls: uses < 3 stays quiet, and a measured observed silences it.
+	writeRecFile(t, root, "lesson", "lesson.bbbb0021", "predicted low uses",
+		"claim with a prediction\n**NOT.** guess\n"+provenanceMarker,
+		func(fm codec.Frontmatter) {
+			fm["predicted"] = "จะลด flaky test ลงครึ่ง"
+			fm["uses"] = 1
+		})
+	writeRecFile(t, root, "lesson", "lesson.bbbb0022", "predicted and measured",
+		"claim with a prediction\n**NOT.** guess\n"+provenanceMarker,
+		func(fm codec.Frontmatter) {
+			fm["predicted"] = "จะลด flaky test ลงครึ่ง"
+			fm["observed"] = "fixed: flaky เหลือ 0"
+			fm["uses"] = 5
+		})
+	_, warnings2, err := Verify(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range warnings2 {
+		if strings.Contains(w, "bbbb0021") || strings.Contains(w, "bbbb0022") {
+			if strings.Contains(w, "predicted") {
+				t.Fatalf("control record must not warn: %q", w)
+			}
+		}
+	}
+}
+
+func TestVerifyProblemTooLong(t *testing.T) {
+	root := copyHome(t)
+	writeRecFile(t, root, "lesson", "lesson.bbbb0023", "overlong problem key",
+		"claim\n**NOT.** guess\n"+provenanceMarker,
+		func(fm codec.Frontmatter) {
+			fm["problem"] = strings.Repeat("y", 81)
+		})
+	_, warnings, err := Verify(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMsg(warnings, "problem ยาว") {
+		t.Fatalf("overlong problem warning missing: %v", warnings)
+	}
+}

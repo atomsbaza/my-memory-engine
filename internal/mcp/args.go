@@ -102,3 +102,12 @@ type CompactArgs struct {
 	MinGroup int  `json:"min_group,omitempty"`
 	DryRun   bool `json:"dry_run,omitempty"`
 }
+
+// OutcomeArgs is memory_outcome's arguments (engine-only additive tool):
+// id is required; at least one of fixed/missed/note must be non-empty.
+type OutcomeArgs struct {
+	ID     string `json:"id"`
+	Fixed  string `json:"fixed"`
+	Missed string `json:"missed"`
+	Note   string `json:"note"`
+}

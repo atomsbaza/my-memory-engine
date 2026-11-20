@@ -87,11 +87,18 @@ func cmdEval(e *Env, c command, argv []string) int {
 	if metrics.AbstentionTotal > 0 {
 		header += fmt.Sprintf(" · abstention %d", metrics.AbstentionTotal)
 	}
+	if metrics.UpdateTotal > 0 {
+		header += fmt.Sprintf(" · update %d", metrics.UpdateTotal)
+	}
 	fmt.Fprintf(e.Stdout, "%s · window %dd\n", header, *days)
 	fmt.Fprintf(e.Stdout, "recall@5 = %v\n", metrics.Recall5)
 	if metrics.AbstentionTotal > 0 {
 		fmt.Fprintf(e.Stdout, "abstention = %v (%d/%d no-answer คู่ต้องไม่ match)\n",
 			metrics.AbstentionPrecision, metrics.AbstentionPass, metrics.AbstentionTotal)
+	}
+	if metrics.UpdateTotal > 0 {
+		fmt.Fprintf(e.Stdout, "update = %v (%d/%d คู่ kind:update ต้องได้ตัวปัจจุบัน ไม่ใช่ตัวที่ถูก supersede)\n",
+			metrics.UpdateAccuracy, metrics.UpdatePass, metrics.UpdateTotal)
 	}
 	fmt.Fprintf(e.Stdout, "MRR = %v\n", metrics.MRR)
 	origins := make([]string, 0, len(metrics.PerOrigin))

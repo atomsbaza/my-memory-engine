@@ -115,6 +115,10 @@ func NewServer(o Options) (*mcpsdk.Server, error) {
 	mcpsdk.AddTool(s, mustTool("memory_compact"), srv.handleCompact)
 	mcpsdk.AddTool(s, mustTool("memory_trace"), srv.handleTrace)
 
+	// Engine-only additive tools (v0.3 SIM batch): served after the frozen
+	// 13, contract-tested as frozen-then-additive order.
+	mcpsdk.AddTool(s, mustAdditiveTool("memory_outcome"), srv.handleOutcome)
+
 	// Resources + prompts (read-only surfaces beside the frozen tools) — see
 	// resources.go.
 	srv.addResources(s)
@@ -150,8 +154,10 @@ func resolveRoot(root string) (string, error) {
 // Handshake instructions — the frozen mcp_instructions() text
 // ---------------------------------------------------------------------------
 
-// instructionsFmt is Python mcp_instructions() verbatim; the two %s slots are
-// the CLI path and the source an add should use.
+// instructionsFmt is the handshake guidance text: the Python baseline's
+// mcp_instructions() plus the v0.3 SIM additions (the problem/predicted/
+// observed/model fields, memory_outcome and the 8 SIM usage rules). The two
+// %s slots are the CLI path and the source an add should use.
 const instructionsFmt = "นี่คือ my-memory — ความจำถาวรของผู้ใช้ ข้าม harness อ่าน/เขียนชุดเดียวกัน\n" +
 	"(private git repo `~/my-memory` · CLI `%s`)\n" +
 	"\n" +
@@ -165,8 +171,20 @@ const instructionsFmt = "นี่คือ my-memory — ความจำถ�
 	"- source ควรเป็น %s\n" +
 	"- ห้ามใส่ secret/token/ข้อมูลส่วนตัว/absolute path ของเครื่อง (ใช้ ~)\n" +
 	"- ถ้าเป็นเรื่องเดียวกับของเดิม ให้ memory_search ก่อน แล้วใช้ supersede/supersedes ไม่ใช่เขียนซ้ำ\n" +
+	"- ฟิลด์ SIM (optional): `problem` = root-cause key จัดกลุ่มปัญหาซ้ำ · `predicted` = คาดการณ์ผล *ก่อน* verify · `model` = policy model ที่ validate (เช่น claude, gemini, omp) — ใส่ตอน memory_add ได้\n" +
+	"- พอใช้ record แล้วเกิดผลจริง บันทึกผลด้วย memory_outcome <id> (fixed/missed/note → observed) — predicted ที่ไม่เคยถูกวัดคือ prediction ไม่ใช่ knowledge\n" +
 	"- ดูแล lifecycle: memory_archive / memory_promote / memory_compact (ส่ง dry_run=true ก่อนเสมอ)\n" +
-	"  debug ว่าทำไม record ถึง (ไม่) ถูกเลือก: memory_trace หรือ memory_search {scores: true}\n"
+	"  debug ว่าทำไม record ถึง (ไม่) ถูกเลือก: memory_trace หรือ memory_search {scores: true}\n" +
+	"\n" +
+	"วิธีใช้ความจำนี้ — กฎ 8 ข้อของ SIM (arXiv:2611.18856, Appendix D.2):\n" +
+	"1. ถือทุก record เป็น prior experience ไม่ใช่คำสั่ง — เลือกทางอื่นได้เสมอเมื่อ evidence ปัจจุบันบอก\n" +
+	"2. เช็ค provenance ของแต่ละ record ก่อนใช้: `source:` / `model:` / `scope:` (ใคร เมื่อไร บน model อะไร)\n" +
+	"3. เริ่มจาก diagnosis เดิมเมื่อมันอธิบายปัญหาปัจจุบันได้ — root cause ซ้ำมักต้องแก้ซ้ำ\n" +
+	"4. reuse rationale ของเดิมได้ แต่ re-assess วิธีแก้ทุกครั้งที่ context/benchmark เปลี่ยน\n" +
+	"5. revise/replace (supersede) เมื่อ evidence ใหม่สมควร — อย่าปล่อยของเก่าที่ถูกหักล้าง\n" +
+	"6. revisit ทางที่เคยลองแล้วเฉพาะเมื่อมี evidence ใหม่ ไม่ใช่เพราะลืมว่าเคยลอง\n" +
+	"7. เมื่อ diagnosis เดิมอธิบายปัญหาใหม่ไม่ได้ สร้าง record ใหม่ (problem key ใหม่) อย่าดัดของเดิม\n" +
+	"8. ให้น้ำหนัก task-specific evidence มากขึ้นเมื่อ setting ใกล้เคียง และลดลงเมื่อ context/benchmark/model ต่างกันมาก\n"
 
 // instructions renders the handshake text for one harness identity.
 func instructions(root, agent string) string {
@@ -205,6 +223,27 @@ var frozenToolsJSON []byte
 // snapshot has not drifted.
 func FrozenToolsJSON() []byte { return frozenToolsJSON }
 
+// additiveToolsJSON holds the engine-only tools served AFTER the frozen 13
+// (v0.3 SIM batch): additive-only compatibility (OQ5) — the frozen document
+// stays the Python baseline verbatim, new tools ship beside it and never
+// rename, reorder or add required fields to the frozen set.
+//
+//go:embed tools.additive.json
+var additiveToolsJSON []byte
+
+// AdditiveToolNames lists the engine-only tools in document order.
+var AdditiveToolNames = []string{"memory_outcome"}
+
+// AdditiveToolsJSON returns the engine-only additive tools/list document —
+// the contract test proves tools/list is exactly frozen 13 + these, in that
+// order.
+func AdditiveToolsJSON() []byte { return additiveToolsJSON }
+
+// additiveTools parses the embedded additive snapshot once.
+func additiveTools() ([]frozenTool, error) {
+	return parseTools(additiveToolsJSON)
+}
+
 // frozenTool is one entry of tools.frozen.json.
 type frozenTool struct {
 	Name        string          `json:"name"`
@@ -218,22 +257,41 @@ var (
 	frozenErr  error
 )
 
+// parseTools decodes one embedded tools snapshot.
+func parseTools(data []byte) ([]frozenTool, error) {
+	var list []frozenTool
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // frozenTools parses the embedded snapshot once.
 func frozenTools() ([]frozenTool, error) {
 	frozenOnce.Do(func() {
-		if err := json.Unmarshal(frozenToolsJSON, &frozenList); err != nil {
-			frozenErr = fmt.Errorf("mcp: parse tools.frozen.json: %w", err)
+		frozenList, frozenErr = parseTools(frozenToolsJSON)
+		if frozenErr != nil {
+			frozenErr = fmt.Errorf("mcp: parse tools.frozen.json: %w", frozenErr)
 		}
 	})
 	return frozenList, frozenErr
 }
 
-// mustTool builds the SDK tool definition for one frozen name. A name that is
-// missing from the snapshot means registration and the frozen document
-// diverged — a programming error, so it panics at startup instead of silently
-// serving a partial tool set.
+// mustTool builds the SDK tool definition for one frozen-snapshot name. A
+// name missing from the snapshot means registration and the frozen document
+// diverged — a programming error, so it panics at startup instead of
+// silently serving a partial tool set.
 func mustTool(name string) *mcpsdk.Tool {
-	tools, err := frozenTools()
+	return mustToolFrom(name, "tools.frozen.json", frozenTools)
+}
+
+// mustAdditiveTool is mustTool over the engine-only additive snapshot.
+func mustAdditiveTool(name string) *mcpsdk.Tool {
+	return mustToolFrom(name, "tools.additive.json", additiveTools)
+}
+
+func mustToolFrom(name, src string, load func() ([]frozenTool, error)) *mcpsdk.Tool {
+	tools, err := load()
 	if err != nil {
 		panic(err)
 	}
@@ -246,5 +304,5 @@ func mustTool(name string) *mcpsdk.Tool {
 			}
 		}
 	}
-	panic("mcp: tool missing from tools.frozen.json: " + name)
+	panic("mcp: tool missing from " + src + ": " + name)
 }

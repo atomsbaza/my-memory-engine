@@ -650,3 +650,42 @@ func execCommand(root string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+// --- Add with SIM fields (v0.3 problem/predicted/observed/model) -------------
+
+func TestAddCarriesSIMFields(t *testing.T) {
+	root := copyHome(t)
+	gitInit(t, root)
+
+	res, err := Add(root, store.Record{Layer: "lesson", Scope: "global",
+		Body: "retry with exponential backoff instead of immediate retry\n**NOT.** ห้าม retry ทันที\n" + provenanceMarker},
+		AddOptions{Title: "backoff lesson", Problem: "rate-limit-retry",
+			Predicted: "failed call ลดลงครึ่งหนึ่ง", Model: "omp"})
+	if err != nil {
+		t.Fatalf("add with SIM fields: %v", err)
+	}
+	rec := recByID(t, root, res.ID)
+	for field, want := range map[string]string{
+		"problem":   "rate-limit-retry",
+		"predicted": "failed call ลดลงครึ่งหนึ่ง",
+		"model":     "omp",
+	} {
+		if got := strField(rec.Front, field); got != want {
+			t.Fatalf("%s = %q, want %q", field, got, want)
+		}
+	}
+	if got := strField(rec.Front, "observed"); got != "" {
+		t.Fatalf("observed = %q, want empty at add time", got)
+	}
+
+	// The write path enforces the schema cap (write.go ValidateRecord).
+	_, err = Add(root, store.Record{Layer: "lesson", Scope: "global",
+		Body: "another distinct claim for the cap probe\n**NOT.** อื่น\n" + provenanceMarker},
+		AddOptions{Title: "cap probe", Problem: strings.Repeat("z", 81)})
+	if err == nil {
+		t.Fatal("over-long problem must be refused at write time")
+	}
+	if !strings.Contains(err.Error(), "problem") || !strings.Contains(err.Error(), "80") {
+		t.Fatalf("refusal should name the field and cap, got: %v", err)
+	}
+}

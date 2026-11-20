@@ -1,0 +1,30 @@
+[
+  {
+    "name": "memory_outcome",
+    "description": "บันทึกผลที่วัดได้หลังใช้ record (SIM observed): observed = \"fixed: …; missed: …; note: …\" — คู่กับ predicted ที่เขียนตอน memory_add ไม่แตะ uses (การ cite แยกไว้ที่ memory_cite)",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "id หรือ unique prefix ของ record ที่จะบันทึกผล"
+        },
+        "fixed": {
+          "type": "string",
+          "description": "อะไรที่ดีขึ้น/ผ่านหลังใช้ record นี้"
+        },
+        "missed": {
+          "type": "string",
+          "description": "อะไรที่ยังพลาด/ไม่ดีขึ้น"
+        },
+        "note": {
+          "type": "string",
+          "description": "หมายเหตุการวัด (เช่น model, benchmark, round)"
+        }
+      }
+    }
+  }
+]

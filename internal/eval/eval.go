@@ -35,6 +35,14 @@ type Pair struct {
 	Expect []string `json:"expect"`
 	Origin string   `json:"origin,omitempty"`
 	Note   string   `json:"note,omitempty"`
+	// Kind "update" marks a knowledge-update pair (SIM D: retrieval must
+	// prefer the current record over a superseded twin): the expect ids must
+	// surface AND every id in Stale must be absent from the top-k. Any other
+	// Kind (or empty) is a plain retrieval pair.
+	Kind string `json:"kind,omitempty"`
+	// Stale lists superseded ids that must NOT appear in the top-k of a
+	// kind:update pair.
+	Stale []string `json:"stale,omitempty"`
 }
 
 // OriginStat is the per-origin breakdown.
@@ -62,6 +70,14 @@ type Metrics struct {
 	AbstentionPass      int     `json:"abstention_pass"`
 	AbstentionTotal     int     `json:"abstention_total"`
 	AbstentionPrecision float64 `json:"abstention_precision"`
+
+	// Update accuracy (SIM knowledge-update pairs, kind:"update"): a pair
+	// passes when an expected id is in the top-k AND no stale id is. The
+	// gate requires >= 0.9 whenever update pairs exist; a baseline without
+	// the fields loads as zero (no update pairs).
+	UpdatePass     int     `json:"update_pass"`
+	UpdateTotal    int     `json:"update_total"`
+	UpdateAccuracy float64 `json:"update_accuracy"`
 }
 
 // Result carries the run outcome; Fails follows the Python gate rules and
@@ -142,6 +158,27 @@ func LoadGolden(root string) ([]Pair, error) {
 		}
 		if v, ok := raw["note"]; ok {
 			_ = json.Unmarshal(v, &p.Note)
+		}
+		if v, ok := raw["kind"]; ok {
+			if err := json.Unmarshal(v, &p.Kind); err != nil {
+				return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: kind ต้องเป็น str", i+1)
+			}
+			if p.Kind != "" && p.Kind != "update" {
+				return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: kind ที่รู้จักมีแค่ \"update\" (ได้ %q)", i+1, p.Kind)
+			}
+		}
+		if v, ok := raw["stale"]; ok {
+			if err := json.Unmarshal(v, &p.Stale); err != nil {
+				return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: stale ต้องเป็น list ของ id", i+1)
+			}
+			for _, e := range p.Stale {
+				if strings.TrimSpace(e) == "" {
+					return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: stale ต้องเป็น list ของ id (str ไม่ว่าง)", i+1)
+				}
+			}
+			if p.Kind != "update" {
+				return nil, fmt.Errorf("eval/golden.jsonl บรรทัด %d: stale ใช้ได้เฉพาะคู่ kind:update", i+1)
+			}
 		}
 		pairs = append(pairs, p)
 	}
@@ -289,11 +326,28 @@ func Run(root string, o Options) (Result, error) {
 			pickedRecs = append(pickedRecs, s.Rec)
 		}
 		top := echoIDs(domain.RenderRecallBody(pickedRecs, 1400))
+		hit := false
 		for _, e := range p.Expect {
 			if idx := indexOf(top, e); idx >= 0 {
 				a[0]++
 				a[1] += 1.0 / float64(idx+1)
+				hit = true
 				break
+			}
+		}
+		// SIM knowledge-update pairs (kind:"update"): the current record
+		// must surface AND every superseded twin must stay out of the top-k.
+		if p.Kind == "update" {
+			metrics.UpdateTotal++
+			clean := true
+			for _, s := range p.Stale {
+				if indexOf(top, s) >= 0 {
+					clean = false
+					break
+				}
+			}
+			if hit && clean {
+				metrics.UpdatePass++
 			}
 		}
 	}
@@ -355,6 +409,9 @@ func Run(root string, o Options) (Result, error) {
 	}
 	if metrics.AbstentionTotal > 0 {
 		metrics.AbstentionPrecision = round4(float64(metrics.AbstentionPass) / float64(metrics.AbstentionTotal))
+	}
+	if metrics.UpdateTotal > 0 {
+		metrics.UpdateAccuracy = round4(float64(metrics.UpdatePass) / float64(metrics.UpdateTotal))
 	}
 
 	rows := readRecallLog(root, o.Days)
@@ -431,6 +488,15 @@ func Run(root string, o Options) (Result, error) {
 		res.Fails = append(res.Fails, fmt.Sprintf(
 			"abstention precision %v < 1.0 — คู่ no-answer ต้องไม่ match เลย (ผ่าน %d/%d)",
 			metrics.AbstentionPrecision, metrics.AbstentionPass, metrics.AbstentionTotal))
+	}
+
+	// Update gate (SIM knowledge updates): absolute floor 0.9 — retrieval
+	// must prefer the current record over its superseded twin on every
+	// kind:update pair, whether or not the baseline predates the field.
+	if metrics.UpdateTotal > 0 && metrics.UpdateAccuracy < 0.9 {
+		res.Fails = append(res.Fails, fmt.Sprintf(
+			"update accuracy %v < 0.9 — คู่ kind:update ต้องดึง record ปัจจุบัน ไม่ใช่ตัวที่ถูก supersede (ผ่าน %d/%d)",
+			metrics.UpdateAccuracy, metrics.UpdatePass, metrics.UpdateTotal))
 	}
 
 	if len(res.Fails) > 0 {

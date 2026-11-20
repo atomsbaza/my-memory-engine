@@ -26,8 +26,8 @@ S5 recall gate: recall@5 0.8667 · MRR 0.85 · 30 pairs · hook latency p50 61 m
 | **Write guards** | Secret scan, absolute-path refusal, PII regex (email/phone/SSN/card), prompt-injection warnings, near-duplicate block (jaccard ≥ 0.88) / warn band (0.60–0.88), atomicity limits (warn > 1500 chars, refuse > 8000 — suggest a `knowledge` pointer), knowledge layer requires ≥ 1 tag. Failures are observable — never silent. |
 | **Idempotent ingest** | Every record carries `content_sha256` over its normalized body (NFC, LF, trailing-space and blank-run collapse). Re-adding identical content is exit 0 naming the existing record instead of a dedup block; cross-scope duplicates warn. `review --stale` reports decay candidates read-only; `links/graph --mentions` opts into bare id mentions (off by default). |
 | **Hooks** | Three events (`session-start`, `user-prompt`, `stop`) × four output formats (`text`, `json`, `hermes`, `cursor`) × seven harness registries. Fail-open with a runtime log line; hooks always `exit 0` and never push. |
-| **MCP server** | 13 frozen tools over stdio JSON-RPC (`memory_context`, `memory_search`, `memory_show`, `memory_cite`, `memory_add`, `memory_list`, `memory_verify`, `memory_stats`, `memory_sync`, `memory_archive`, `memory_promote`, `memory_compact`, `memory_trace`) plus read-only Resources and a bootstrap Prompt (see "MCP surfaces"). |
-| **Eval gate** | 30-pair golden corpus, recall@5 + MRR + threshold sweep + abstention (no-answer pairs must match nothing — precision must stay 1.0), fail-closed against `eval/baseline.json`. Runs as a recurring gate on every engine change that can affect retrieval. |
+| **MCP server** | 13 frozen tools over stdio JSON-RPC (`memory_context`, `memory_search`, `memory_show`, `memory_cite`, `memory_add`, `memory_list`, `memory_verify`, `memory_stats`, `memory_sync`, `memory_archive`, `memory_promote`, `memory_compact`, `memory_trace`) + the additive `memory_outcome` (SIM observed), plus read-only Resources and a bootstrap Prompt (see "MCP surfaces"). |
+| **Eval gate** | 30-pair golden corpus, recall@5 + MRR + threshold sweep + abstention (no-answer pairs must match nothing — precision must stay 1.0) + update accuracy (`kind:"update"` pairs must surface the current record while the superseded twin stays out of the top-k — floor 0.9), fail-closed against `eval/baseline.json`. Runs as a recurring gate on every engine change that can affect retrieval. |
 | **Sync** | Any git remote (GitHub / Bitbucket / self-hosted) through the git CLI. Opt-in per memory home, never `--force`, conflicts stop with a named file. |
 | **Observability** | `mem trace <query>` prints the RRF breakdown (fts/vec/scored ranks, retention score) plus per-layer context budgets; `mem stats` reports decay buckets and harness coverage. |
 | **Installer** | `mem-install` wires MCP for nine harnesses (claude, codex, gemini, opencode, cursor, hermes, omp, kiro-cli, qoder) plus hooks where supported — idempotent, byte-backup before every write, warns on `core.hooksPath`. |
@@ -78,11 +78,13 @@ mem hook --agent claude --event user-prompt --format json   # harness hook entry
 
 The server exposes three protocol surfaces, separated by who controls the call:
 
-- **Tools (writes + agent-driven calls, frozen):** the 13 `memory_*` tools —
-  the surface six installed harnesses already depend on (names, descriptions
-  and schemas pinned by `internal/mcp/tools.frozen.json` and the contract
-  tests). `memory_add` inherits the domain write guards, including the
-  atomicity limits and the knowledge-needs-a-tag rule.
+- **Tools (writes + agent-driven calls, frozen + additive):** the 13 frozen
+  `memory_*` tools — the surface six installed harnesses already depend on
+  (names, descriptions and schemas pinned by `internal/mcp/tools.frozen.json`
+  and the contract tests) — served unchanged, then the engine-only additive
+  tools from `internal/mcp/tools.additive.json` (v0.3: `memory_outcome`).
+  `memory_add` inherits the domain write guards, including the atomicity
+  limits and the knowledge-needs-a-tag rule.
 - **Resources (host-controlled reads):** the client attaches what it wants;
   a read is never something the model decides to call. Strictly read-only —
   no record is touched (`no_touch` semantics, proven by test):
@@ -105,6 +107,54 @@ The server exposes three protocol surfaces, separated by who controls the call:
 
 All three lists are static (no `listChanged` notifications) and stdout stays
 pure newline-delimited JSON-RPC (contract-tested).
+
+### SIM alignment — predicted vs observed, provenance, 8 usage rules
+
+Adapted from *Self-Improvement Memory* (SIM/CRSI, Google Cloud AI + DeepMind,
+arXiv:2611.18856): the value of a memory is the **attempt history + predicted/observed
+outcomes**, not just the diagnosis. v0.3 encodes that into the record format and the
+MCP handshake.
+
+**Frontmatter fields (optional, all layers — primary use: lesson):**
+
+| field | written when | cap | meaning |
+|---|---|---|---|
+| `problem` | add | 80 | root-cause/grouping key for a recurring problem (e.g. `rate-limit-retry`, `premature-completion`) |
+| `predicted` | add | 200 | what this record predicts will improve — recorded BEFORE verification |
+| `observed` | `mem outcome` | 200 | measured outcome after use: `fixed: …; missed: …; note: …` |
+| `model` | add | 40 | policy model / harness this was validated on (e.g. `claude`, `gemini`, `omp`) |
+
+- `mem add --problem P --predicted T --model M` (and `--observed` for completeness);
+  `mem outcome <id> [--fixed T] [--missed T] [--note T]` writes `observed`, bumps
+  `last_used` and commits — it deliberately does NOT touch `uses` (citing that a record
+  changed a decision and measuring what happened are different signals; `mem cite` owns
+  the counter). The MCP face is `memory_outcome` (additive tool #14).
+- `mem verify` warns when a lesson carries `predicted` but no `observed` after
+  `uses ≥ 3` ("predicted ยังไม่ถูกตรวจ — รัน mem outcome") and when `problem`
+  exceeds 80 runes; the schema refuses wrong types and over-cap values at write time.
+- Retrieval eval grows an update-accuracy category: a golden pair with
+  `"kind": "update"` passes only when an expected id is in the top-k AND every id in
+  `"stale"` is absent — retrieval must prefer the current record over its superseded
+  twin. Gate floor 0.9.
+
+**The 8 SIM usage rules** (Appendix D.2, adapted; carried verbatim in the MCP
+`initialize` instructions and pointed at from every session-start injection):
+
+1. Treat every record as prior experience, not an order — a different path is allowed
+   whenever current evidence says so.
+2. Check each record's provenance before use: `source:` / `model:` / `scope:`.
+3. Start from the old diagnosis when it explains the current problem.
+4. Reuse the rationale, but re-assess the fix whenever the context/benchmark changed.
+5. Revise/replace (`supersede`) when new evidence warrants it.
+6. Revisit a previously tried path only with new evidence — not because it was forgotten.
+7. Create a new record (new `problem` key) when the old diagnosis no longer explains.
+8. Weight task-specific evidence higher when the setting is close, lower when the
+   context/benchmark/model differ substantially.
+
+The full block lives in `internal/mcp/mcp.go` (`instructionsFmt`); the session-start
+render (hook inject) carries a one-line pointer (`record = prior experience … กฎ SIM
+8 ข้อ: README`) instead of the full rules — the render head is outside the section
+budgets, so the pointer never displaces record content.
 
 ### Staleness report (`review --stale`)
 

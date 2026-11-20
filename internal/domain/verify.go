@@ -183,6 +183,22 @@ func Verify(root string) (problems, warnings []string, err error) {
 			warnings = append(warnings, fmt.Sprintf("%s: lesson ควรมี **NOT.** (anti-pattern)", r.Rel))
 		}
 
+		// SIM predicted-vs-observed (v0.3): a lesson that predicted an
+		// outcome and has been used repeatedly without ever measuring the
+		// result is an unverified prediction, not knowledge.
+		if r.Layer == "lesson" && strField(r.Front, "predicted") != "" &&
+			strField(r.Front, "observed") == "" && r.Uses >= 3 {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: predicted ยังไม่ถูกตรวจ (uses=%d) — รัน `mem outcome %s --fixed ... --missed ...` บันทึก observed",
+				r.Rel, r.Uses, r.ID))
+		}
+		// problem is a grouping key; prose-length values defeat the grouping.
+		if p := strField(r.Front, "problem"); rlen(p) > 80 {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: problem ยาว %d ตัวอักษร เกิน 80 — ย่อเป็น root-cause key สั้น ๆ (เช่น \"rate-limit-retry\")",
+				r.Rel, rlen(p)))
+		}
+
 		// content_sha256 freshness (KB P1, idempotent ingest): a present but
 		// stale hash means the body was edited by hand or predates the field
 		// — advisory only, never blocking (the next matching add simply

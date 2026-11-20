@@ -89,6 +89,70 @@ func Cite(root, id string) (string, error) {
 	return fullID, err
 }
 
+// observedCap is the schema cap on the observed field (SIM field defaults).
+const observedCap = 200
+
+// Outcome records the measured outcome of using one record (v0.3 SIM batch,
+// arXiv:2611.18856 — the "observed" half of predicted-vs-observed): it
+// writes the joined fixed/missed/note summary into the observed front-matter
+// field and bumps last_used, deliberately WITHOUT touching uses — citing the
+// record as a decision input (Cite) and measuring what happened (Outcome)
+// are different signals. At least one of fixed/missed/note is required; the
+// id resolves by exact id or unique prefix like Cite. Like Review, the write
+// is followed by a local commit so the measurement survives.
+func Outcome(root, id, fixed, missed, note string) (string, string, error) {
+	if strings.TrimSpace(fixed) == "" && strings.TrimSpace(missed) == "" && strings.TrimSpace(note) == "" {
+		return "", "", errf(2, "outcome ต้องมี --fixed/--missed/--note อย่างน้อยหนึ่งตัว (observed ว่างไม่ได้)")
+	}
+	var parts []string
+	if s := strings.TrimSpace(fixed); s != "" {
+		parts = append(parts, "fixed: "+s)
+	}
+	if s := strings.TrimSpace(missed); s != "" {
+		parts = append(parts, "missed: "+s)
+	}
+	if s := strings.TrimSpace(note); s != "" {
+		parts = append(parts, "note: "+s)
+	}
+	observed := strings.Join(parts, "; ")
+	if n := rlen(observed); n > observedCap {
+		return "", "", errf(1, "observed ยาว %d ตัวอักษร เกิน cap %d — สรุปให้สั้นลง (แยก note ละเอียดไว้ที่ evidence หรือ body)", n, observedCap)
+	}
+
+	var fullID string
+	err := store.WithLock(root, func() error {
+		recs, err := store.Scan(root)
+		if err != nil {
+			return fmt.Errorf("domain: outcome: %w", err)
+		}
+		var matches []store.Record
+		for _, r := range recs {
+			if r.ID == id || strings.HasPrefix(r.ID, id) {
+				matches = append(matches, r)
+			}
+		}
+		if len(matches) != 1 {
+			return errf(1, "id ไม่ชัด: ตรง %d records ('%s')", len(matches), id)
+		}
+		r := matches[0]
+		m := cloneFront(r.Front)
+		m["observed"] = observed
+		m["last_used"] = today()
+		if rerr := rewriteRecord(r.Path, r.Body, m); rerr != nil {
+			return fmt.Errorf("domain: outcome %s: %w", r.ID, rerr)
+		}
+		if rerr := ReindexRoot(root); rerr != nil {
+			return fmt.Errorf("domain: outcome %s persisted but reindex failed: %w", r.ID, rerr)
+		}
+		if cerr := store.CommitPath(root, r.Rel, fmt.Sprintf("outcome(%s): record observed result %s", r.Scope, r.ID)); cerr != nil {
+			return fmt.Errorf("domain: outcome %s persisted but commit failed: %w", r.ID, cerr)
+		}
+		fullID = r.ID
+		return nil
+	})
+	return fullID, observed, err
+}
+
 // Review is the single quarantine exit (Python cmd_review): it flips
 // sensitivity quarantine -> internal, appends the screening evidence to the
 // record so the audit trace travels with it, rewrites, reindexes and

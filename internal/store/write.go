@@ -330,7 +330,7 @@ func commitMsg(root, rel, msg string) error {
 		return fmt.Errorf("git add %s: %w: %s", rel, err, truncRunes(firstLine(string(out)), 200))
 	}
 	// Hermetic identity: commits must not depend on the machine's global
-// git config.
+	// git config.
 	commit := exec.Command(git, "-C", root,
 		"-c", "user.name=mem-engine", "-c", "user.email=mem-engine@localhost",
 		"commit", "-m", msg, "--", rel)
