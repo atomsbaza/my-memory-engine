@@ -1,14 +1,14 @@
 # mem P2.3 MCP gate
-# date:     2026-11-20T03:03:06Z
-# sha:      1dd8587
+# date:     2026-11-20T05:02:45Z
+# sha:      90a69a2
 # go:       go version go1.27.3 darwin/arm64
 # baseline: ok (~/my-memory/bin/mem)
 === RUN   TestInitializeHandshake
---- PASS: TestInitializeHandshake (0.13s)
+--- PASS: TestInitializeHandshake (0.11s)
 === RUN   TestInstructionsShape
 --- PASS: TestInstructionsShape (0.00s)
 === RUN   TestToolsListMatchesFrozenSnapshot
---- PASS: TestToolsListMatchesFrozenSnapshot (0.17s)
+--- PASS: TestToolsListMatchesFrozenSnapshot (0.12s)
 === RUN   TestAdditiveToolContract
 --- PASS: TestAdditiveToolContract (0.00s)
 === RUN   TestFrozenRequiredAndProperties
@@ -27,12 +27,12 @@
 === RUN   TestToolCallsWired/memory_promote
 === RUN   TestToolCallsWired/memory_compact
 === RUN   TestToolCallsWired/memory_trace
---- PASS: TestToolCallsWired (0.35s)
+--- PASS: TestToolCallsWired (0.31s)
     --- PASS: TestToolCallsWired/memory_context (0.00s)
-    --- PASS: TestToolCallsWired/memory_search (0.01s)
+    --- PASS: TestToolCallsWired/memory_search (0.00s)
     --- PASS: TestToolCallsWired/memory_show (0.00s)
-    --- PASS: TestToolCallsWired/memory_cite (0.02s)
-    --- PASS: TestToolCallsWired/memory_add (0.07s)
+    --- PASS: TestToolCallsWired/memory_cite (0.01s)
+    --- PASS: TestToolCallsWired/memory_add (0.06s)
     --- PASS: TestToolCallsWired/memory_list (0.00s)
     --- PASS: TestToolCallsWired/memory_verify (0.00s)
     --- PASS: TestToolCallsWired/memory_stats (0.00s)
@@ -44,13 +44,13 @@
 === RUN   TestMalformedInputRejected
 --- PASS: TestMalformedInputRejected (0.12s)
 === RUN   TestNotFoundRecordIsAnError
---- PASS: TestNotFoundRecordIsAnError (0.11s)
+--- PASS: TestNotFoundRecordIsAnError (0.10s)
 === RUN   TestFrozenSnapshotIsNineExactTools
 --- PASS: TestFrozenSnapshotIsNineExactTools (0.00s)
 === RUN   TestCapabilitiesAdvertiseResourcesAndPrompts
---- PASS: TestCapabilitiesAdvertiseResourcesAndPrompts (0.11s)
+--- PASS: TestCapabilitiesAdvertiseResourcesAndPrompts (0.10s)
 === RUN   TestResourcesListStaticAndTemplates
---- PASS: TestResourcesListStaticAndTemplates (0.10s)
+--- PASS: TestResourcesListStaticAndTemplates (0.11s)
 === RUN   TestRulesResource
 --- PASS: TestRulesResource (0.10s)
 === RUN   TestStatsResource
@@ -58,11 +58,11 @@
 === RUN   TestRecordResourceResolvesPrefix
 --- PASS: TestRecordResourceResolvesPrefix (0.11s)
 === RUN   TestContextResource
---- PASS: TestContextResource (0.10s)
+--- PASS: TestContextResource (0.11s)
 === RUN   TestContextResourceBudgetClamp
---- PASS: TestContextResourceBudgetClamp (0.11s)
+--- PASS: TestContextResourceBudgetClamp (0.10s)
 === RUN   TestBootstrapPrompt
---- PASS: TestBootstrapPrompt (0.11s)
+--- PASS: TestBootstrapPrompt (0.10s)
 === RUN   TestMemoryAddIdempotent
 --- PASS: TestMemoryAddIdempotent (0.15s)
 === RUN   TestInstructionsSIMRules
@@ -70,9 +70,9 @@
 === RUN   TestMemoryOutcomeWired
 --- PASS: TestMemoryOutcomeWired (0.16s)
 PASS
-ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	2.241s
+ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	2.352s
 === RUN   TestStdioPurity
---- PASS: TestStdioPurity (0.46s)
+--- PASS: TestStdioPurity (0.28s)
 === RUN   TestToolsListFrozenContract
 --- PASS: TestToolsListFrozenContract (0.01s)
 === RUN   TestMemoryOutcomeOverStdio
@@ -88,8 +88,8 @@ ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	2.241s
 === RUN   TestPositiveCalls/memory_stats
 === RUN   TestPositiveCalls/memory_sync
 === RUN   TestPositiveCalls/memory_trace
---- PASS: TestPositiveCalls (0.13s)
-    --- PASS: TestPositiveCalls/memory_add (0.03s)
+--- PASS: TestPositiveCalls (0.12s)
+    --- PASS: TestPositiveCalls/memory_add (0.02s)
     --- PASS: TestPositiveCalls/memory_search (0.01s)
     --- PASS: TestPositiveCalls/memory_show (0.01s)
     --- PASS: TestPositiveCalls/memory_list (0.01s)
@@ -98,7 +98,7 @@ ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	2.241s
     --- PASS: TestPositiveCalls/memory_sync (0.02s)
     --- PASS: TestPositiveCalls/memory_trace (0.01s)
 === RUN   TestMalformedInput
---- PASS: TestMalformedInput (0.10s)
+--- PASS: TestMalformedInput (0.11s)
 === RUN   TestCapabilitiesAdvertiseResourcesAndPrompts
 --- PASS: TestCapabilitiesAdvertiseResourcesAndPrompts (0.01s)
 === RUN   TestResourcesContract
@@ -108,6 +108,6 @@ ok  	github.com/atomsbaza/my-memory-engine/internal/mcp	2.241s
 === RUN   TestAddGuardrailsOverMCP
 --- PASS: TestAddGuardrailsOverMCP (0.05s)
 PASS
-ok  	github.com/atomsbaza/my-memory-engine/tests/mcp	1.904s
+ok  	github.com/atomsbaza/my-memory-engine/tests/mcp	1.837s
 exit=0
 baseline=ok (~/my-memory/bin/mem)
