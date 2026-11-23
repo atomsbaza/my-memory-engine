@@ -310,7 +310,12 @@ func Score(rec store.Record, query, scope string, w schema.Scoring) float64 {
 	if rec.Status != "active" {
 		s -= 10.0
 	}
-	if lu, err := time.Parse("2006-01-02", strField(rec.Front, "last_used")); err == nil {
+	// Parse the civil date as LOCAL midnight (matching Python's
+	// date.fromisoformat, which is timezone-naive): subtracting local
+	// midnight from local midnight gives the exact calendar-day delta in
+	// every timezone. time.Parse (UTC) here made `dd` wrong for ~7h each
+	// day in UTC+7 (local-midnight minus UTC-midnight).
+	if lu, err := time.ParseInLocation("2006-01-02", strField(rec.Front, "last_used"), time.Local); err == nil {
 		hl := halfLifeDays(rec)
 		dd := int(truncateToDate(timeNow()).Sub(lu).Hours() / 24)
 		if dd < 0 {

@@ -1,27 +1,27 @@
 # mem P2.2 CLI gate
-# date: 2026-11-23T17:19:02Z
-# sha:  cf888d0
+# date: 2026-11-23T17:27:07Z
+# sha:  65f5032
 # go:   go version go1.27.4 darwin/arm64
 === RUN   TestInitScaffoldsUsableHome
 --- PASS: TestInitScaffoldsUsableHome (0.16s)
 === RUN   TestInitLeavesExistingHomeUntouched
---- PASS: TestInitLeavesExistingHomeUntouched (0.10s)
+--- PASS: TestInitLeavesExistingHomeUntouched (0.11s)
 === RUN   TestDoctorReportsMissingIndex
---- PASS: TestDoctorReportsMissingIndex (0.20s)
+--- PASS: TestDoctorReportsMissingIndex (0.21s)
 === RUN   TestDoctorReportsBrokenFrontMatter
---- PASS: TestDoctorReportsBrokenFrontMatter (0.13s)
+--- PASS: TestDoctorReportsBrokenFrontMatter (0.16s)
 === RUN   TestStatsJSONPurity
---- PASS: TestStatsJSONPurity (0.10s)
+--- PASS: TestStatsJSONPurity (0.12s)
 === RUN   TestStatsTextCounts
---- PASS: TestStatsTextCounts (0.09s)
+--- PASS: TestStatsTextCounts (0.11s)
 === RUN   TestRenderWritesBlockAndSkips
---- PASS: TestRenderWritesBlockAndSkips (0.10s)
+--- PASS: TestRenderWritesBlockAndSkips (0.13s)
 === RUN   TestRenderPrintMode
---- PASS: TestRenderPrintMode (0.10s)
+--- PASS: TestRenderPrintMode (0.11s)
 === RUN   TestEvalJSONPurityAndGate
---- PASS: TestEvalJSONPurityAndGate (0.12s)
+--- PASS: TestEvalJSONPurityAndGate (0.14s)
 === RUN   TestEvalEmptyGolden
---- PASS: TestEvalEmptyGolden (0.12s)
+--- PASS: TestEvalEmptyGolden (0.11s)
 === RUN   TestManifestCounts
 --- PASS: TestManifestCounts (0.00s)
 === RUN   TestDocumentedManifestMatchesCode
@@ -35,13 +35,13 @@
 === RUN   TestUnknownCommand
 --- PASS: TestUnknownCommand (0.00s)
 === RUN   TestUnknownFlagIsUsageError
---- PASS: TestUnknownFlagIsUsageError (0.10s)
+--- PASS: TestUnknownFlagIsUsageError (0.11s)
 === RUN   TestSubcommandHelp
 --- PASS: TestSubcommandHelp (0.00s)
 === RUN   TestHomeFlagForms
---- PASS: TestHomeFlagForms (0.12s)
+--- PASS: TestHomeFlagForms (0.14s)
 === RUN   TestHomeFlagAfterCommandIsUsageError
---- PASS: TestHomeFlagAfterCommandIsUsageError (0.10s)
+--- PASS: TestHomeFlagAfterCommandIsUsageError (0.11s)
 === RUN   TestHomeFlagRequiresValue
 --- PASS: TestHomeFlagRequiresValue (0.00s)
 === RUN   TestMissingHomeFailsLoudly
@@ -52,45 +52,45 @@
     cli_test.go:300: set UPDATE_CLI_DOC=1 to regenerate docs/cli-commands.md
 --- SKIP: TestGenerateCLIDoc (0.00s)
 === RUN   TestContextRendersRules
---- PASS: TestContextRendersRules (0.10s)
+--- PASS: TestContextRendersRules (0.11s)
 === RUN   TestContextTouchesAndLogs
---- PASS: TestContextTouchesAndLogs (0.13s)
+--- PASS: TestContextTouchesAndLogs (0.14s)
 === RUN   TestSearchFindsAndMisses
---- PASS: TestSearchFindsAndMisses (0.10s)
+--- PASS: TestSearchFindsAndMisses (0.11s)
 === RUN   TestSearchScoresFlag
---- PASS: TestSearchScoresFlag (0.10s)
+--- PASS: TestSearchScoresFlag (0.11s)
 === RUN   TestListLimitAndStatus
---- PASS: TestListLimitAndStatus (0.10s)
+--- PASS: TestListLimitAndStatus (0.11s)
 === RUN   TestShowByIDAndPath
---- PASS: TestShowByIDAndPath (0.10s)
+--- PASS: TestShowByIDAndPath (0.11s)
 === RUN   TestAddWritesRecordAndCommits
 --- PASS: TestAddWritesRecordAndCommits (0.18s)
 === RUN   TestAddGuardsAndDedup
---- PASS: TestAddGuardsAndDedup (0.20s)
+--- PASS: TestAddGuardsAndDedup (0.23s)
 === RUN   TestAddAtomicityGuardrail
---- PASS: TestAddAtomicityGuardrail (0.15s)
+--- PASS: TestAddAtomicityGuardrail (0.17s)
 === RUN   TestAddKnowledgeRequiresTag
---- PASS: TestAddKnowledgeRequiresTag (0.14s)
+--- PASS: TestAddKnowledgeRequiresTag (0.17s)
 === RUN   TestAddExternalSourceNeedsEvidence
---- PASS: TestAddExternalSourceNeedsEvidence (0.15s)
+--- PASS: TestAddExternalSourceNeedsEvidence (0.17s)
 === RUN   TestAddUsageErrors
---- PASS: TestAddUsageErrors (0.09s)
+--- PASS: TestAddUsageErrors (0.11s)
 === RUN   TestCiteAndTouch
---- PASS: TestCiteAndTouch (0.11s)
+--- PASS: TestCiteAndTouch (0.13s)
 === RUN   TestReviewRequiresEvidenceAndReleasesQuarantine
 --- PASS: TestReviewRequiresEvidenceAndReleasesQuarantine (0.17s)
 === RUN   TestSupersedeChain
 --- PASS: TestSupersedeChain (0.13s)
 === RUN   TestVerifyCleanAndBroken
---- PASS: TestVerifyCleanAndBroken (0.10s)
+--- PASS: TestVerifyCleanAndBroken (0.11s)
 === RUN   TestReindexRebuildsIndex
---- PASS: TestReindexRebuildsIndex (0.10s)
+--- PASS: TestReindexRebuildsIndex (0.11s)
 === RUN   TestAddNoCommit
---- PASS: TestAddNoCommit (0.14s)
+--- PASS: TestAddNoCommit (0.15s)
 === RUN   TestImportFromDir
---- PASS: TestImportFromDir (0.12s)
+--- PASS: TestImportFromDir (0.13s)
 === RUN   TestImportRejectsBadSource
---- PASS: TestImportRejectsBadSource (0.10s)
+--- PASS: TestImportRejectsBadSource (0.11s)
 === RUN   TestEmbedSetOllamaRoundTripAndBackup
 --- PASS: TestEmbedSetOllamaRoundTripAndBackup (0.04s)
 === RUN   TestEmbedSetCustomModelAndURL
@@ -100,7 +100,7 @@
 === RUN   TestReindexOffModeProvablyDropsEmb
 --- PASS: TestReindexOffModeProvablyDropsEmb (0.01s)
 === RUN   TestOffModeIdentity
---- PASS: TestOffModeIdentity (0.05s)
+--- PASS: TestOffModeIdentity (0.04s)
 === RUN   TestGraphJSONSchemaAndDedup
 --- PASS: TestGraphJSONSchemaAndDedup (0.01s)
 === RUN   TestGraphRelated
@@ -116,19 +116,19 @@
 === RUN   TestGraphDefaultOutputFile
 --- PASS: TestGraphDefaultOutputFile (0.01s)
 === RUN   TestGraphUsage
---- PASS: TestGraphUsage (0.01s)
+--- PASS: TestGraphUsage (0.00s)
 === RUN   TestGraphEngineRepoWarning
 --- PASS: TestGraphEngineRepoWarning (0.01s)
 === RUN   TestGraphIsReadOnly
---- PASS: TestGraphIsReadOnly (0.21s)
+--- PASS: TestGraphIsReadOnly (0.18s)
 === RUN   TestHookSessionStartInjectsContext
---- PASS: TestHookSessionStartInjectsContext (0.16s)
+--- PASS: TestHookSessionStartInjectsContext (0.14s)
 === RUN   TestHookUserPromptSilentForTinyPrompt
---- PASS: TestHookUserPromptSilentForTinyPrompt (0.12s)
+--- PASS: TestHookUserPromptSilentForTinyPrompt (0.11s)
 === RUN   TestHookUserPromptSilentForNonsensePrompt
---- PASS: TestHookUserPromptSilentForNonsensePrompt (0.12s)
+--- PASS: TestHookUserPromptSilentForNonsensePrompt (0.11s)
 === RUN   TestHookUserPromptInjectsRecall
---- PASS: TestHookUserPromptInjectsRecall (0.14s)
+--- PASS: TestHookUserPromptInjectsRecall (0.12s)
 === RUN   TestHookPayloadExtraction
 --- PASS: TestHookPayloadExtraction (0.13s)
 === RUN   TestHookFormats
@@ -136,19 +136,19 @@
 === RUN   TestEmitHookEmptyCursorContinue
 --- PASS: TestEmitHookEmptyCursorContinue (0.00s)
 === RUN   TestHookStopCommitsLocally
---- PASS: TestHookStopCommitsLocally (0.22s)
+--- PASS: TestHookStopCommitsLocally (0.24s)
 === RUN   TestHookFailOpen
 --- PASS: TestHookFailOpen (0.00s)
 === RUN   TestHookUsageErrors
 --- PASS: TestHookUsageErrors (0.00s)
 === RUN   TestHookStopNeverPushes
---- PASS: TestHookStopNeverPushes (0.54s)
+--- PASS: TestHookStopNeverPushes (0.55s)
 === RUN   TestHookStopGitFailureFailOpen
 --- PASS: TestHookStopGitFailureFailOpen (0.53s)
 === RUN   TestAddIdempotentCLI
---- PASS: TestAddIdempotentCLI (0.24s)
+--- PASS: TestAddIdempotentCLI (0.28s)
 === RUN   TestLinksSupersedeChain
---- PASS: TestLinksSupersedeChain (0.00s)
+--- PASS: TestLinksSupersedeChain (0.01s)
 === RUN   TestLinksDepthExpandsSupersedeChain
 --- PASS: TestLinksDepthExpandsSupersedeChain (0.01s)
 === RUN   TestLinksEvidenceAndBodyRefs
@@ -160,21 +160,21 @@
 === RUN   TestLinksPrefixResolution
 --- PASS: TestLinksPrefixResolution (0.01s)
 === RUN   TestLinksJSON
---- PASS: TestLinksJSON (0.00s)
+--- PASS: TestLinksJSON (0.01s)
 === RUN   TestLinksIsReadOnly
---- PASS: TestLinksIsReadOnly (0.14s)
+--- PASS: TestLinksIsReadOnly (0.17s)
 === RUN   TestArchiveDryRunMirrorsBaseline
---- PASS: TestArchiveDryRunMirrorsBaseline (0.10s)
+--- PASS: TestArchiveDryRunMirrorsBaseline (0.11s)
 === RUN   TestPromoteDryRunForce
---- PASS: TestPromoteDryRunForce (0.10s)
+--- PASS: TestPromoteDryRunForce (0.11s)
 === RUN   TestCompactDryRun
---- PASS: TestCompactDryRun (0.09s)
+--- PASS: TestCompactDryRun (0.11s)
 === RUN   TestPromoteScanWritesCandidatesFile
---- PASS: TestPromoteScanWritesCandidatesFile (0.09s)
+--- PASS: TestPromoteScanWritesCandidatesFile (0.11s)
 === RUN   TestPromoteScanNoActiveLessons
---- PASS: TestPromoteScanNoActiveLessons (0.09s)
+--- PASS: TestPromoteScanNoActiveLessons (0.11s)
 === RUN   TestPromoteRealRunWritesRule
---- PASS: TestPromoteRealRunWritesRule (0.11s)
+--- PASS: TestPromoteRealRunWritesRule (0.13s)
 === RUN   TestLinksWithoutMentionsByteIdentical
 --- PASS: TestLinksWithoutMentionsByteIdentical (0.01s)
 === RUN   TestLinksMentions
@@ -184,35 +184,35 @@
 === RUN   TestGraphMentionsDefaultUnchanged
 --- PASS: TestGraphMentionsDefaultUnchanged (0.01s)
 === RUN   TestReviewStaleReport
---- PASS: TestReviewStaleReport (0.14s)
+--- PASS: TestReviewStaleReport (0.17s)
 === RUN   TestReviewStaleJSON
---- PASS: TestReviewStaleJSON (0.14s)
+--- PASS: TestReviewStaleJSON (0.18s)
 === RUN   TestReviewStaleUsageErrors
---- PASS: TestReviewStaleUsageErrors (0.09s)
+--- PASS: TestReviewStaleUsageErrors (0.11s)
 === RUN   TestReviewQuarantineUnchangedByStale
---- PASS: TestReviewQuarantineUnchangedByStale (0.14s)
+--- PASS: TestReviewQuarantineUnchangedByStale (0.17s)
 === RUN   TestSyncNoUpstreamStaysOffline
---- PASS: TestSyncNoUpstreamStaysOffline (0.19s)
+--- PASS: TestSyncNoUpstreamStaysOffline (0.20s)
 === RUN   TestSyncConflictExitsThree
 --- PASS: TestSyncConflictExitsThree (0.22s)
 === RUN   TestSyncOtherGitFailureExitsOne
---- PASS: TestSyncOtherGitFailureExitsOne (0.35s)
+--- PASS: TestSyncOtherGitFailureExitsOne (0.31s)
 === RUN   TestSyncHappyPathReportsPushed
---- PASS: TestSyncHappyPathReportsPushed (0.22s)
+--- PASS: TestSyncHappyPathReportsPushed (0.23s)
 === RUN   TestHookStopDoesNotPush
---- PASS: TestHookStopDoesNotPush (0.26s)
+--- PASS: TestHookStopDoesNotPush (0.23s)
 PASS
-ok  	github.com/atomsbaza/my-memory-engine/internal/cli	9.626s
+ok  	github.com/atomsbaza/my-memory-engine/internal/cli	10.085s
 === RUN   TestBinaryInitVerifyDoctor
---- PASS: TestBinaryInitVerifyDoctor (0.68s)
+--- PASS: TestBinaryInitVerifyDoctor (0.39s)
 === RUN   TestBinaryManifest
 --- PASS: TestBinaryManifest (0.01s)
 === RUN   TestBinaryWritePathExitCodes
---- PASS: TestBinaryWritePathExitCodes (0.21s)
+--- PASS: TestBinaryWritePathExitCodes (0.23s)
 === RUN   TestBinaryStatsJSONPurity
 --- PASS: TestBinaryStatsJSONPurity (0.07s)
 === RUN   TestBinarySyncLocalOnly
---- PASS: TestBinarySyncLocalOnly (0.15s)
+--- PASS: TestBinarySyncLocalOnly (0.17s)
 PASS
-ok  	github.com/atomsbaza/my-memory-engine/tests/cli	1.902s
+ok  	github.com/atomsbaza/my-memory-engine/tests/cli	1.598s
 exit=0
