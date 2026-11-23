@@ -247,7 +247,13 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 	}
 	ranked := make([]store.Record, len(recs))
 	copy(ranked, recs)
-	sort.SliceStable(ranked, func(i, j int) bool { return scores[ranked[i].ID] > scores[ranked[j].ID] })
+	sort.SliceStable(ranked, func(i, j int) bool {
+		si, sj := scores[ranked[i].ID], scores[ranked[j].ID]
+		if si != sj {
+			return si > sj
+		}
+		return tieBefore(ranked[i], ranked[j])
+	})
 
 	if len(qTokens) > 0 {
 		// Python: thresh = 2.0 + LAYER_WEIGHT["handoff"] (=4.0); hits must
@@ -313,7 +319,10 @@ func SelectFrom(recs []store.Record, o SelectOptions) ([]store.Record, error) {
 			if ri != rj {
 				return ri > rj
 			}
-			return scores[hits[i].ID] > scores[hits[j].ID]
+			if si, sj := scores[hits[i].ID], scores[hits[j].ID]; si != sj {
+				return si > sj
+			}
+			return tieBefore(hits[i], hits[j])
 		})
 		ranked = hits
 	}
@@ -426,7 +435,19 @@ func vectorIDs(recs []store.Record, query string, limit int) []string {
 			best[c.id] = sim
 		}
 	}
-	sort.SliceStable(order, func(i, j int) bool { return best[order[i]] > best[order[j]] })
+	var byID map[string]store.Record
+	sort.SliceStable(order, func(i, j int) bool {
+		if best[order[i]] != best[order[j]] {
+			return best[order[i]] > best[order[j]]
+		}
+		if byID == nil {
+			byID = make(map[string]store.Record, len(recs))
+			for _, r := range recs {
+				byID[r.ID] = r
+			}
+		}
+		return tieBefore(byID[order[i]], byID[order[j]])
+	})
 	if len(order) > limit {
 		order = order[:limit]
 	}
@@ -629,7 +650,12 @@ func PickForQuery(recs []store.Record, o RetrievalOptions) ([]ScoredRecord, erro
 			}
 		}
 	}
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		return tieBefore(hits[i].Rec, hits[j].Rec)
+	})
 
 	picked := make([]ScoredRecord, 0, o.Limit)
 	seen := map[string]bool{}
@@ -644,4 +670,19 @@ func PickForQuery(recs []store.Record, o RetrievalOptions) ([]ScoredRecord, erro
 		}
 	}
 	return picked, nil
+}
+
+// tieBefore orders two records whose ranking keys are exactly equal (same
+// score, or same fused RRF and score) into a total order independent of scan
+// order: uses desc, then created desc (ISO dates compare as strings), then
+// id asc. Callers consult it only on that equality; a record never ties with
+// itself, so both arguments are distinct records.
+func tieBefore(a, b store.Record) bool {
+	if a.Uses != b.Uses {
+		return a.Uses > b.Uses
+	}
+	if a.Created != b.Created {
+		return a.Created > b.Created
+	}
+	return a.ID < b.ID
 }

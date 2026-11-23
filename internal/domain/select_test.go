@@ -5,6 +5,7 @@ package domain
 
 import (
 	"math"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -471,4 +472,142 @@ func nil2Records(t *testing.T, root string) []store.Record {
 		t.Fatal(err)
 	}
 	return recs
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic tie-break on exact score equality
+// ---------------------------------------------------------------------------
+
+// tieFixtures returns four lessons with IDENTICAL computed score (same title,
+// body, confidence, last_used; w_uses = 0 so `uses` is outside the score) in
+// the REVERSE of the order the tie-break must produce, so a stable sort alone
+// ranks them wrong:
+//
+//	lesson.c  uses 1                 → higher uses wins
+//	lesson.b  uses 0, created 03-01  → newer created wins
+//	lesson.a  uses 0, created 01-01  → lower id wins over lesson.a0
+//	lesson.a0 uses 0, created 01-01
+func tieFixtures() []store.Record {
+	mk := func(id, created string, uses int) store.Record {
+		r := mrec(id, "lesson", "zebra title", "plain unrelated body", "global", nil)
+		r.Created = created
+		r.Uses = uses
+		return r
+	}
+	return []store.Record{
+		mk("lesson.a0", "2026-01-01", 0),
+		mk("lesson.a", "2026-01-01", 0),
+		mk("lesson.b", "2026-03-01", 0),
+		mk("lesson.c", "2026-01-01", 1),
+	}
+}
+
+func tieScores(t *testing.T, recs []store.Record) {
+	t.Helper()
+	for _, r := range recs[1:] {
+		if !floatEq(Score(recs[0], "zebra", "global", DefaultScoring), Score(r, "zebra", "global", DefaultScoring)) {
+			t.Fatalf("fixture must score identically: %v vs %v",
+				Score(recs[0], "zebra", "global", DefaultScoring), Score(r, "zebra", "global", DefaultScoring))
+		}
+	}
+}
+
+var tieWant = []string{"lesson.c", "lesson.b", "lesson.a", "lesson.a0"}
+
+func TestSelectTieBreakChain(t *testing.T) {
+	pinClock(t, "2026-11-08T10:00:00")
+	recs := tieFixtures()
+	tieScores(t, recs)
+	got := SelectFrom2(t, recs, SelectOptions{Query: "zebra", Limit: 10})
+	if !reflect.DeepEqual(got, tieWant) {
+		t.Fatalf("score tie order = %v, want %v (uses desc, created desc, id asc)", got, tieWant)
+	}
+}
+
+// The RRF-fused ordering needs the same chain when both the fused score AND
+// the record score are equal: two records ranked 1st/2nd in the vector list
+// and 2nd/1st in the dense list (equal weights) contribute identical RRF, and
+// sit past the scored top-50 so that list cannot separate them either.
+func TestSelectRRFTieBreakChain(t *testing.T) {
+	pinClock(t, "2026-11-08T10:00:00")
+	// 50 higher-scoring fillers push the pair out of the scored rank list.
+	recs := make([]store.Record, 0, 52)
+	for i := 0; i < selectLimit; i++ {
+		recs = append(recs, mrec("lesson.f"+strconv.Itoa(i), "lesson", "zebra title",
+			"plain unrelated body", "global", func(fm codec.Frontmatter) { fm["confidence"] = "1.0" }))
+	}
+	// Input order is the loser first.
+	older := mrec("lesson.old", "lesson", "zebra title", "plain unrelated body", "global", nil)
+	used := mrec("lesson.used", "lesson", "zebra title", "plain unrelated body", "global", nil)
+	used.Uses = 1
+	recs = append(recs, older, used)
+	o := SelectOptions{
+		Query: "zebra", Limit: selectLimit + 2,
+		VecIDs:   []string{"lesson.old", "lesson.used"},
+		DenseIDs: []string{"lesson.used", "lesson.old"},
+	}
+	var b Breakdown
+	probe := o
+	probe.Breakdown = &b
+	if _, err := SelectFrom(recs, probe); err != nil {
+		t.Fatal(err)
+	}
+	if b.RRF["lesson.old"] != b.RRF["lesson.used"] || b.Ranks["lesson.old"].Scored != 0 {
+		t.Fatalf("fixture must fuse to an equal RRF outside the scored list: %+v vs %+v",
+			b.Ranks["lesson.old"], b.Ranks["lesson.used"])
+	}
+	// The fillers lead on the scored list (weight 6); the equal-RRF pair is
+	// the tail, where only the tie-break can order them.
+	got := idList(mustSelect(t, recs, o))
+	if tail := got[selectLimit:]; !reflect.DeepEqual(tail, []string{"lesson.used", "lesson.old"}) {
+		t.Fatalf("RRF tie order = %v, want [lesson.used lesson.old]", tail)
+	}
+}
+
+func TestPickForQueryTieBreakChain(t *testing.T) {
+	pinClock(t, "2026-11-08T10:00:00")
+	recs := tieFixtures()
+	tieScores(t, recs)
+	ids := func(picked []ScoredRecord) []string {
+		out := make([]string, 0, len(picked))
+		for _, p := range picked {
+			out = append(out, p.Rec.ID)
+		}
+		return out
+	}
+	// Limit 3 makes the tie-break decide membership, not only order.
+	picked, err := PickForQuery(recs, RetrievalOptions{Query: "zebra", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(picked); !reflect.DeepEqual(got, tieWant[:3]) {
+		t.Fatalf("pick tie order = %v, want %v", got, tieWant[:3])
+	}
+
+	// Total order: the result must not depend on input (scan) order.
+	for _, order := range [][]int{{0, 1, 2, 3}, {3, 2, 1, 0}, {2, 0, 3, 1}} {
+		shuffled := make([]store.Record, 0, 4)
+		for _, i := range order {
+			shuffled = append(shuffled, recs[i])
+		}
+		first, _ := SelectFrom(shuffled, SelectOptions{Query: "zebra", Limit: 10})
+		second, _ := SelectFrom(shuffled, SelectOptions{Query: "zebra", Limit: 10})
+		if !reflect.DeepEqual(idList(first), tieWant) || !reflect.DeepEqual(idList(second), tieWant) {
+			t.Fatalf("SelectFrom input order %v: %v then %v, want %v both runs", order, idList(first), idList(second), tieWant)
+		}
+		p1, _ := PickForQuery(shuffled, RetrievalOptions{Query: "zebra", Limit: 4})
+		p2, _ := PickForQuery(shuffled, RetrievalOptions{Query: "zebra", Limit: 4})
+		if !reflect.DeepEqual(ids(p1), tieWant) || !reflect.DeepEqual(ids(p2), tieWant) {
+			t.Fatalf("PickForQuery input order %v: %v then %v, want %v both runs", order, ids(p1), ids(p2), tieWant)
+		}
+	}
+}
+
+func mustSelect(t *testing.T, recs []store.Record, o SelectOptions) []store.Record {
+	t.Helper()
+	out, err := SelectFrom(recs, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
