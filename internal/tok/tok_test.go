@@ -36,11 +36,21 @@ func TestTokenizeUnknownThaiGrouped(t *testing.T) {
 }
 
 func TestSegmentForFTS(t *testing.T) {
-	in := "## หัวข้อ: ค้นหาความจำ quick-sort_2"
+	in := "## หัวข้อ: ค้นหาความจำ quick-sort_2 ค้นหาQuick-Sort_2ในระบบ"
 	got := SegmentForFTS(in)
-	want := "## หัวข้อ: ค้นหา ความจำ quick-sort_2"
+	want := "## หัวข้อ: ค้นหา ความจำ quick-sort_2 ค้นหา Quick-Sort_2 ใน ระบบ"
 	if got != want {
 		t.Fatalf("SegmentForFTS = %q, want %q", got, want)
+	}
+}
+
+func TestTokenizeDPMinimalSegments(t *testing.T) {
+	// "ไปหามา" in greedy left-to-right could pick "ไปหา" + "มา" (2) or if
+	// a prefix traps into 3 tokens; DP picks minimal segments ("ไปหา","มา" or "ไป","หามา").
+	// Verify deterministic minimal segmentation (2 tokens, not 3).
+	got := Tokenize("ไปหามา")
+	if len(got) != 2 {
+		t.Fatalf("Tokenize(ไปหามา) = %v (len %d), want 2 segments", got, len(got))
 	}
 }
 

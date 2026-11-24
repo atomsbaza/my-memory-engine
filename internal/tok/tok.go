@@ -47,10 +47,7 @@ func loadDict() {
 	})
 }
 
-var (
-	tokenRe   = regexp.MustCompile(`[0-9A-Za-z_ก-๙]+`)
-	thaiRunRe = regexp.MustCompile(`[ก-๙]+`)
-)
+var tokenRe = regexp.MustCompile(`[0-9A-Za-z_ก-๙]+`)
 
 func isThaiRune(r rune) bool {
 	return r >= 'ก' && r <= '๙'
@@ -83,15 +80,18 @@ func Tokenize(s string) []string {
 	return out
 }
 
-// SegmentForFTS inserts spaces between segmented Thai words in s while
-// preserving all non-Thai text, casing, punctuation, and markdown syntax.
+// SegmentForFTS inserts spaces between segmented Thai words and at Thai/non-Thai
+// script boundaries in s while preserving all non-Thai text, casing,
+// punctuation, and markdown syntax.
 func SegmentForFTS(s string) string {
 	if s == "" || !hasThai(s) {
 		return s
 	}
-	return thaiRunRe.ReplaceAllStringFunc(s, func(run string) string {
-		segs := segmentThai([]rune(run))
-		return strings.Join(segs, " ")
+	return tokenRe.ReplaceAllStringFunc(s, func(tok string) string {
+		if !hasThai(tok) {
+			return tok
+		}
+		return strings.Join(splitMixedToken(tok), " ")
 	})
 }
 
@@ -131,12 +131,13 @@ func segmentThai(runes []rune) []string {
 	nextIdx := make([]int, n)
 	known := make([]bool, n)
 
+	matches := make([]int, 0, 8)
 	for i := n - 1; i >= 0; i-- {
 		dp[i] = inf
 		cur := 0
 		// Walk the trie forward from i; record the longest-first tie-break
 		// by keeping the best (lowest) dp[j+1] and preferring larger j on ties.
-		var matches []int
+		matches = matches[:0]
 		for j := i; j < n; j++ {
 			nxt, ok := trie[cur].next[runes[j]]
 			if !ok {
