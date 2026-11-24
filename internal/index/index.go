@@ -27,7 +27,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
+	"github.com/atomsbaza/my-memory-engine/internal/tok"
 	"github.com/atomsbaza/my-memory-engine/internal/vec"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver (cgo-free, FTS5 built in)
@@ -58,7 +58,7 @@ const (
 	// SchemaVersion is the derived-index schema generation this build
 	// writes. A file stamped with a different value is stale: rebuild it,
 	// never reuse it silently (AC-P1-09).
-	SchemaVersion = 1
+	SchemaVersion = 2
 
 	// pythonIndexName is the Python engine's index file. This engine must
 	// not open it for writing — REQ-IDX-01 forbids touching it.
@@ -266,7 +266,7 @@ func (ix *Index) Rebuild(records []store.Record) error {
 			return fmt.Errorf("index: rebuild %s: insert rec %s: %w", ix.path, r.ID, err)
 		}
 		if fts {
-			if _, err := insFts.Exec(r.ID, title, r.Body, tags); err != nil {
+			if _, err := insFts.Exec(r.ID, tok.SegmentForFTS(title), tok.SegmentForFTS(r.Body), tok.SegmentForFTS(tags)); err != nil {
 				return fmt.Errorf("index: rebuild %s: insert fts %s: %w", ix.path, r.ID, err)
 			}
 		}
@@ -549,18 +549,15 @@ func (ix *Index) searchSubstring(query string, limit int) ([]string, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Tokenizer — Python tokens() / fts_ids parity
+// Tokenizer — Thai-aware tokens() / fts_ids
 // ---------------------------------------------------------------------------
 
-// tokenRe mirrors Python tokens(): re.findall(r"[0-9A-Za-z_ก-๙]+", s.lower()).
-var tokenRe = regexp.MustCompile(`[0-9A-Za-z_ก-๙]+`)
-
-// tokens returns the distinct [0-9A-Za-z_ก-๙]+ matches over the lowercased
-// input, sorted. Python returns a set; OR-matching is order-insensitive,
-// and sorting keeps the generated MATCH expression deterministic.
+// tokens returns the distinct lowercased, Thai-segmented tokens of s, sorted.
+// OR-matching is order-insensitive, and sorting keeps the generated MATCH
+// expression deterministic.
 func tokens(s string) []string {
 	seen := make(map[string]struct{})
-	for _, t := range tokenRe.FindAllString(strings.ToLower(s), -1) {
+	for _, t := range tok.Tokenize(s) {
 		seen[t] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))
