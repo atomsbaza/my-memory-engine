@@ -13,6 +13,7 @@ import (
 	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/schema"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
+	"github.com/atomsbaza/my-memory-engine/internal/tok"
 )
 
 // DefaultScoring mirrors Python DEFAULT_SCORING — shipped neutral.
@@ -38,14 +39,12 @@ func LayerWeight(layer string) float64 {
 	return 1.0
 }
 
-// tokenRe mirrors Python tokens(): re.findall(r"[0-9A-Za-z_ก-๙]+", s.lower()).
-var tokenRe = regexp.MustCompile(`[0-9A-Za-z_ก-๙]+`)
-
-// Tokens returns the distinct word tokens of s, lowercased (Python set).
+// Tokens returns the distinct word tokens of s, lowercased and Thai-segmented.
 func Tokens(s string) map[string]bool {
-	out := map[string]bool{}
-	for _, m := range tokenRe.FindAllString(strings.ToLower(s), -1) {
-		out[m] = true
+	toks := tok.Tokenize(s)
+	out := make(map[string]bool, len(toks))
+	for _, t := range toks {
+		out[t] = true
 	}
 	return out
 }

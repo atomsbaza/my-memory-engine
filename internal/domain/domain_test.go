@@ -689,3 +689,10 @@ func TestAddCarriesSIMFields(t *testing.T) {
 		t.Fatalf("refusal should name the field and cap, got: %v", err)
 	}
 }
+
+func TestTokensThaiSegmentation(t *testing.T) {
+	got := Tokens("ค้นหาความจำภาษาไทย")
+	if !got["ค้นหา"] || !got["ความจำ"] {
+		t.Fatalf("Tokens missing segmented Thai words: %v", got)
+	}
+}
