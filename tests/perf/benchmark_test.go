@@ -144,6 +144,9 @@ func readArtifact(t *testing.T, path string) artifact {
 // TestHookLatencyGatePassesG6 runs the gate exactly as CI would and proves the
 // evidence carries the five required fields.
 func TestHookLatencyGatePassesG6(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping G6 latency benchmark in -short mode; run go test ./tests/perf -v isolated")
+	}
 	out := filepath.Join(t.TempDir(), "g6.json")
 	code, stdout, stderr := runScript(t,
 		"--corpus", corpusPath,

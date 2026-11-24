@@ -194,7 +194,7 @@ EOF
   exit 0
 fi
 
-[ -n "$repo" ] && [ -d "$repo/.git" ] || { echo "hygiene-gate: not a git repo: $repo" >&2; exit 2; }
+[ -n "$repo" ] && git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "hygiene-gate: not a git repo: $repo" >&2; exit 2; }
 
 out="$(scan "$repo")"; code=$?
 printf '%s\n' "$out" | grep '^HIT' | cut -f2,3 | sed 's/^/  /'
