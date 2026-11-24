@@ -1,0 +1,2 @@
+dict.txt is derived from PyThaiNLP's words_th.txt corpus (CC0 1.0 Universal / Public Domain),
+filtered to pure Thai-script entries matching ^[ก-๙]{2,}$.
