@@ -364,8 +364,8 @@ func TestSchemaVersionStamp(t *testing.T) {
 	if err := ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&raw); err != nil {
 		t.Fatalf("meta.schema_version row: %v", err)
 	}
-	if raw != "2" {
-		t.Fatalf("meta.schema_version = %q, want %q", raw, "2")
+	if raw != "3" {
+		t.Fatalf("meta.schema_version = %q, want %q", raw, "3")
 	}
 	var ftsFlag string
 	if err := ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'fts5'`).Scan(&ftsFlag); err != nil {
@@ -780,5 +780,85 @@ func TestIndexNoNetworkClientDeps(t *testing.T) {
 	}
 	if hits := indexNetDeps(strings.Split(strings.TrimSpace(string(out)), "\n")); len(hits) != 0 {
 		t.Errorf("internal/index gained network-client dependencies: %v", hits)
+	}
+}
+
+func TestSyncIncrementalDeltaAndNoOp(t *testing.T) {
+	home := t.TempDir()
+	ix, err := Open(IndexPath(home))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer ix.Close()
+
+	base := []store.Record{
+		{ID: "lesson.a1", Rel: "lessons/a1.md", Layer: "lesson", Scope: "global", Status: "active", Body: "alpha one", Front: codec.Frontmatter{"title": "Alpha", "created": "2026-11-26", "last_used": "2026-11-26"}},
+		{ID: "lesson.b1", Rel: "lessons/b1.md", Layer: "lesson", Scope: "global", Status: "active", Body: "bravo two", Front: codec.Frontmatter{"title": "Bravo", "created": "2026-11-26", "last_used": "2026-11-26"}},
+	}
+	st, err := ix.Sync(base)
+	if err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	if !st.FullRebuild || st.Total != 2 {
+		t.Fatalf("initial sync = %+v, want FullRebuild=true Total=2", st)
+	}
+
+	// No-op sync with unchanged records.
+	st2, err := ix.Sync(base)
+	if err != nil {
+		t.Fatalf("noop sync: %v", err)
+	}
+	if st2.FullRebuild || st2.Added != 0 || st2.Updated != 0 || st2.Deleted != 0 {
+		t.Fatalf("noop sync = %+v, want zero changes", st2)
+	}
+
+	// Delta sync: delete a1, update b1, add c1.
+	next := []store.Record{
+		{ID: "lesson.b1", Rel: "lessons/b1.md", Layer: "lesson", Scope: "global", Status: "active", Body: "bravo updated zeta", Front: codec.Frontmatter{"title": "Bravo", "created": "2026-11-26", "last_used": "2026-11-26"}},
+		{ID: "lesson.c1", Rel: "lessons/c1.md", Layer: "lesson", Scope: "global", Status: "active", Body: "charlie three", Front: codec.Frontmatter{"title": "Charlie", "created": "2026-11-26", "last_used": "2026-11-26"}},
+	}
+	st3, err := ix.Sync(next)
+	if err != nil {
+		t.Fatalf("delta sync: %v", err)
+	}
+	if st3.FullRebuild || st3.Added != 1 || st3.Updated != 1 || st3.Deleted != 1 {
+		t.Fatalf("delta sync = %+v, want Added=1 Updated=1 Deleted=1", st3)
+	}
+
+	if ids, err := ix.Search("alpha", 5); err != nil || len(ids) != 0 {
+		t.Fatalf("deleted alpha still searchable: %v, %v", ids, err)
+	}
+	if ids, err := ix.Search("zeta", 5); err != nil || len(ids) != 1 || ids[0] != "lesson.b1" {
+		t.Fatalf("updated zeta search = %v, %v", ids, err)
+	}
+	if ids, err := ix.Search("charlie", 5); err != nil || len(ids) != 1 || ids[0] != "lesson.c1" {
+		t.Fatalf("added charlie search = %v, %v", ids, err)
+	}
+}
+
+func TestSyncFallbackOnStaleSchema(t *testing.T) {
+	home := t.TempDir()
+	ix, err := Open(IndexPath(home))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer ix.Close()
+
+	recs := []store.Record{{ID: "lesson.s1", Rel: "lessons/s1.md", Layer: "lesson", Scope: "global", Status: "active", Body: "stale check", Front: codec.Frontmatter{"title": "Stale"}}}
+	if err := ix.Rebuild(recs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.db.Exec(`UPDATE meta SET value = '1' WHERE key = 'schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	st, err := ix.Sync(recs)
+	if err != nil {
+		t.Fatalf("sync stale: %v", err)
+	}
+	if !st.FullRebuild {
+		t.Fatalf("expected FullRebuild on stale schema, got %+v", st)
+	}
+	if v, ok, err := ix.Version(); err != nil || !ok || v != SchemaVersion {
+		t.Fatalf("after stale sync Version = %d, %v, %v", v, ok, err)
 	}
 }
