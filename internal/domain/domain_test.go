@@ -696,3 +696,41 @@ func TestTokensThaiSegmentation(t *testing.T) {
 		t.Fatalf("Tokens missing segmented Thai words: %v", got)
 	}
 }
+
+func TestBiTemporalSupersedeAndContradictionVerify(t *testing.T) {
+	root := copyHome(t)
+	gitInit(t, root)
+
+	r1, err := Add(root, store.Record{Layer: "lesson", Scope: "global", Body: "old approach\n**NOT.** avoid old\n" + provenanceMarker},
+		AddOptions{Title: "Old approach", ValidFrom: "2026-01-01", NoCommit: true})
+	if err != nil {
+		t.Fatalf("add r1: %v", err)
+	}
+	r2, err := Add(root, store.Record{Layer: "lesson", Scope: "global", Body: "new approach contradicting old\n**NOT.** avoid old\n" + provenanceMarker},
+		AddOptions{Title: "New approach", ValidFrom: "2026-11-01", Contradicts: []string{r1.ID}, NoCommit: true})
+	if err != nil {
+		t.Fatalf("add r2: %v", err)
+	}
+	_, warns, err := Verify(root)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	found := false
+	for _, w := range warns {
+		if strings.Contains(w, "active contradiction") && strings.Contains(w, r1.ID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected active contradiction warning, got %v", warns)
+	}
+
+	if err := Supersede(root, r1.ID, r2.ID); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	oldRec := recByID(t, root, r1.ID)
+	if vt := strField(oldRec.Front, "valid_to"); vt == "" {
+		t.Fatalf("superseded record should have valid_to set, got empty")
+	}
+}

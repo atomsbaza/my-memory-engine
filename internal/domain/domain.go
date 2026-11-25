@@ -110,6 +110,12 @@ type AddOptions struct {
 	Observed  string
 	Model     string
 
+	// Bi-temporal & contradiction edges (P1/P2): optional validity window
+	// (YYYY-MM-DD) and explicit contradicting record ids.
+	ValidFrom   string
+	ValidTo     string
+	Contradicts []string
+
 	// NoCommit writes the record without the local git commit (the CLI's
 	// `mem add --no-commit`). The record still lands on disk.
 	NoCommit bool
@@ -428,6 +434,21 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	if opts.Model != "" {
 		fm["model"] = opts.Model
 	}
+	if opts.ValidFrom != "" {
+		if _, perr := time.Parse("2006-01-02", opts.ValidFrom); perr != nil {
+			return AddResult{}, errf(1, "--valid-from ต้องเป็น YYYY-MM-DD (ได้มา: %s)", opts.ValidFrom)
+		}
+		fm["valid_from"] = opts.ValidFrom
+	}
+	if opts.ValidTo != "" {
+		if _, perr := time.Parse("2006-01-02", opts.ValidTo); perr != nil {
+			return AddResult{}, errf(1, "--valid-to ต้องเป็น YYYY-MM-DD (ได้มา: %s)", opts.ValidTo)
+		}
+		fm["valid_to"] = opts.ValidTo
+	}
+	if len(opts.Contradicts) > 0 {
+		fm["contradicts"] = opts.Contradicts
+	}
 	if target != nil {
 		fm["supersedes"] = target.ID
 	}
@@ -450,6 +471,9 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 		oldFM := cloneFront(target.Front)
 		oldFM["status"] = "superseded"
 		oldFM["superseded_by"] = recID
+		if strField(oldFM, "valid_to") == "" {
+			oldFM["valid_to"] = today()
+		}
 		if rerr := rewriteRecord(target.Path, target.Body, oldFM); rerr != nil {
 			return res, fmt.Errorf("domain: add %s persisted but supersede rewrite of %s failed: %w", recID, target.ID, rerr)
 		}

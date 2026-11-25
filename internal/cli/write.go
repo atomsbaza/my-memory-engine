@@ -42,6 +42,10 @@ func cmdAdd(e *Env, c command, argv []string) int {
 	predicted := fs.String("predicted", "", "สิ่งที่ record นี้คาดว่าจะแก้/ดีขึ้น — บันทึกตอนเขียน ก่อน verify (≤200)")
 	observed := fs.String("observed", "", "ผลที่วัดได้จริง (ปกติใช้ mem outcome ภายหลัง ไม่ใช่ตอน add)")
 	model := fs.String("model", "", "policy model/harness ที่ validate (≤40 เช่น claude, gemini, omp)")
+	validFrom := fs.String("valid-from", "", "วันที่เริ่มมีผล (YYYY-MM-DD)")
+	validTo := fs.String("valid-to", "", "วันที่สิ้นสุดผล (YYYY-MM-DD)")
+	var contradicts stringsFlag
+	fs.Var(&contradicts, "contradicts", "id ของ record ที่ขัดแย้ง (ซ้ำได้)")
 	noCommit := fs.Bool("no-commit", false, "เขียนไฟล์แต่ไม่ commit")
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
 		return code
@@ -85,6 +89,9 @@ func cmdAdd(e *Env, c command, argv []string) int {
 		Predicted:   *predicted,
 		Observed:    *observed,
 		Model:       *model,
+		ValidFrom:   *validFrom,
+		ValidTo:     *validTo,
+		Contradicts: contradicts,
 		NoCommit:    *noCommit,
 	})
 	if err != nil {

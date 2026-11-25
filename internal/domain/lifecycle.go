@@ -43,6 +43,9 @@ func Supersede(root, oldID, newID string) error {
 		}
 		oldFM := cloneFront(old.Front)
 		oldFM["status"] = "superseded"
+		if strField(oldFM, "valid_to") == "" {
+			oldFM["valid_to"] = today()
+		}
 		if rerr := rewriteRecord(old.Path, old.Body, oldFM); rerr != nil {
 			return fmt.Errorf("domain: supersede: rewrite %s: %w", old.ID, rerr)
 		}

@@ -82,6 +82,30 @@ func piiHits(text string) ([]string, error) {
 	return hits, nil
 }
 
+func evidenceStringsKey(fm map[string]any, key string) []string {
+	v, ok := fm[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case []string:
+		return x
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if x != "" {
+			return []string{x}
+		}
+	}
+	return nil
+}
+
 // Verify inspects the whole home and returns problems (blocking) and
 // warnings (advisory). A problem means the repo violates the record
 // contract; warnings flag hygiene risks. Unexpected infrastructure errors
@@ -98,6 +122,10 @@ func Verify(root string) (problems, warnings []string, err error) {
 	}
 	recs := rep.Records
 	seen := map[string]string{}
+	byID := make(map[string]store.Record, len(recs))
+	for _, r := range recs {
+		byID[r.ID] = r
+	}
 
 	for _, b := range rep.Broken {
 		problems = append(problems, fmt.Sprintf("%s: ไม่มี frontmatter", b.Rel))
@@ -208,6 +236,20 @@ func Verify(root string) (problems, warnings []string, err error) {
 			warnings = append(warnings, fmt.Sprintf(
 				"%s: content_sha256 ไม่ตรงกับ body ปัจจุบัน (tamper/stale signal)",
 				r.Rel))
+		}
+
+		// Bi-temporal & contradiction checks (P2).
+		vf := strField(r.Front, "valid_from")
+		vt := strField(r.Front, "valid_to")
+		if vf != "" && vt != "" && vf > vt {
+			warnings = append(warnings, fmt.Sprintf("%s: valid_from (%s) มากกว่า valid_to (%s)", r.Rel, vf, vt))
+		}
+		if r.Status == "active" {
+			for _, cid := range evidenceStringsKey(r.Front, "contradicts") {
+				if target, ok := byID[cid]; ok && target.Status == "active" {
+					warnings = append(warnings, fmt.Sprintf("%s: ขัดแย้งที่ยังไม่ถูกปิด (active contradiction): %s ↔ %s", r.Rel, r.ID, target.ID))
+				}
+			}
 		}
 	}
 
