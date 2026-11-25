@@ -64,9 +64,10 @@ func (e *Env) ftsSeam(root string, rebuild bool) (func(string, int) ([]string, e
 // contextRequest is the shared input of `mem context` and the session-start
 // hook (Python run_cmd(cmd_context) reuse).
 type contextRequest struct {
-	Scope  string
-	Query  string
-	Budget int
+	Scope    string
+	Query    string
+	Budget   int
+	PackMode string
 }
 
 // contextText renders the memory block for one scope. It returns the rendered
@@ -88,13 +89,14 @@ func (e *Env) contextText(root string, o contextRequest) (string, []store.Record
 	defer closer()
 	scoring := sch.Scoring
 	text, touched, err := domain.RenderContext(recs, domain.ContextOptions{
-		Root:    root,
-		Scope:   o.Scope,
-		Query:   o.Query,
-		Budget:  o.Budget,
-		Scoring: &scoring,
-		FTS:     fts,
-		Indexed: fts != nil,
+		Root:     root,
+		Scope:    o.Scope,
+		Query:    o.Query,
+		Budget:   o.Budget,
+		PackMode: o.PackMode,
+		Scoring:  &scoring,
+		FTS:      fts,
+		Indexed:  fts != nil,
 	})
 	if err != nil {
 		return "", nil, err

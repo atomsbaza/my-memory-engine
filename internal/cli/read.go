@@ -23,6 +23,7 @@ func cmdContext(e *Env, c command, argv []string) int {
 	scope := fs.String("scope", "", "scope ตรง ๆ (global | project:X | repo:o/n | agent:a)")
 	query := fs.String("query", "", "คำค้น")
 	budget := fs.Int("budget", 0, "budget chars รวม")
+	pack := fs.String("pack", "", "โหมดจัดสรรงบ (default | knapsack)")
 	noTouch := fs.Bool("no-touch", false, "ไม่ต้อง bump last_used")
 	quiet := fs.Bool("quiet", false, "ไม่ต้องรายงานว่า touch กี่ record")
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
@@ -38,7 +39,7 @@ func cmdContext(e *Env, c command, argv []string) int {
 		scopeVal = "project:" + *project
 	}
 
-	text, touched, err := e.contextText(root, contextRequest{Scope: scopeVal, Query: *query, Budget: *budget})
+	text, touched, err := e.contextText(root, contextRequest{Scope: scopeVal, Query: *query, Budget: *budget, PackMode: *pack})
 	if err != nil {
 		return e.fail(err)
 	}

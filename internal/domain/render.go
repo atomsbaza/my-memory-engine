@@ -30,10 +30,11 @@ type ContextOptions struct {
 	Root    string // data repo root; when set, budgets are loaded from its taxonomy.json
 	Scope   string // final scope (CLI composes --project into project:<Name>)
 	Query   string
-	Budget  int // total override; 0 → Budgets["total"]
-	Budgets map[string]int
-	Scoring *schema.Scoring
-	FTS     func(query string, limit int) ([]string, error)
+	Budget   int // total override; 0 → Budgets["total"]
+	Budgets  map[string]int
+	Scoring  *schema.Scoring
+	FTS      func(query string, limit int) ([]string, error)
+	PackMode string // "" (default legacy) | "knapsack" (3-tier greedy knapsack)
 	// Indexed reports that the derived index exists; the vector ranks the
 	// baseline reads from that index therefore exist too.
 	Indexed bool
@@ -109,6 +110,9 @@ func titleOrID(rec store.Record) string {
 // total budget. It returns the rendered text and the touched records (the
 // caller applies Touch unless no-touch). Selection failures propagate.
 func RenderContext(recs []store.Record, o ContextOptions) (string, []store.Record, error) {
+	if o.PackMode == "knapsack" {
+		return renderContextKnapsack(recs, o)
+	}
 	b := &contextBuilder{budgets: o.budgets(), total: 0}
 	b.total = b.budgets["total"]
 	var touched []store.Record
