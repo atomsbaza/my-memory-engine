@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/atomsbaza/my-memory-engine/internal/ext"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -35,8 +36,9 @@ import (
 const (
 	RulesURI           = "memory://rules"
 	StatsURI           = "memory://stats"
-	RecordURITemplate  = "memory://record/{id}"
-	ContextURITemplate = "memory://context{?q,scope,budget}"
+	RecordURITemplate   = "memory://record/{id}"
+	ContextURITemplate  = "memory://context{?q,scope,budget}"
+	ExternalURITemplate = "memory://external{?q,vault,limit}"
 
 	// BootstrapPrompt is the single served prompt name.
 	BootstrapPrompt = "memory_bootstrap"
@@ -85,6 +87,14 @@ func (s *server) addResources(sv *mcpsdk.Server) {
 		MIMEType:    "text/markdown",
 		Description: "Budgeted context pack (RenderContext) with a provenance header of the included record ids. q=query, scope=scope, budget=chars (default 20000, clamped 500..20000).",
 	}, s.handleContextResource)
+
+	sv.AddResourceTemplate(&mcpsdk.ResourceTemplate{
+		URITemplate: ExternalURITemplate,
+		Name:        "external",
+		Title:       "External vault search",
+		MIMEType:    "application/json",
+		Description: "Read-only search over external markdown vaults registered in .memory/external.json. q=query, vault=optional name, limit=max hits (default 10).",
+	}, s.handleExternalResource)
 
 	sv.AddPrompt(&mcpsdk.Prompt{
 		Name:        BootstrapPrompt,
@@ -233,6 +243,40 @@ func (s *server) handleContextResource(_ context.Context, req *mcpsdk.ReadResour
 	fmt.Fprintf(&b, "provenance: %s\n\n", prov)
 	b.WriteString(text)
 	return textResource(uri, "text/markdown", b.String())
+}
+
+func (s *server) handleExternalResource(_ context.Context, req *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
+	uri := req.Params.URI
+	u, err := url.Parse(uri)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", uri, err)
+	}
+	q := u.Query()
+	query := strings.TrimSpace(q.Get("q"))
+	vault := strings.TrimSpace(q.Get("vault"))
+	limit := 10
+	if raw := q.Get("limit"); raw != "" {
+		n, aerr := strconv.Atoi(raw)
+		if aerr != nil || n <= 0 {
+			return nil, fmt.Errorf("%s: invalid limit %q", uri, raw)
+		}
+		limit = n
+	}
+	if query == "" {
+		return textResource(uri, "application/json", "[]\n")
+	}
+	hits, err := ext.Search(s.root, query, vault, limit)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", uri, err)
+	}
+	if hits == nil {
+		hits = []ext.Hit{}
+	}
+	data, err := json.MarshalIndent(hits, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return textResource(uri, "application/json", string(data)+"\n")
 }
 
 // handleBootstrapPrompt renders the memory_bootstrap prompt: one user message
