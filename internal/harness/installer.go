@@ -174,9 +174,8 @@ var mcpCLIs = []mcpCLI{
 	{name: "hermes", bin: "hermes", addArgs: func(mem string) []string {
 		return []string{"mcp", "add", "my-memory", "--command", mem, "--args", "mcp"}
 	}},
-	// kiro-cli + qoder: MCP only — neither has a session-hook config the
-	// installer can merge (kiro hooks live inside agent JSON, qoder's hook
-	// support is unverified), so they appear in mcpCLIs only.
+	// kiro-cli: MCP only — kiro hooks live inside per-agent JSON files.
+	// qoder: MCP + grouped hooks in ~/.qoder/settings.json.
 	{name: "kiro", bin: "kiro-cli", addArgs: func(mem string) []string {
 		// Default scope is workspace, which only loads inside a directory
 		// that has its own .kiro/; global is ~/.kiro/settings/mcp.json and is
@@ -339,6 +338,11 @@ var groupedHookFiles = []hookFile{
 		// gemini forces stdout to be JSON, hence --format json.
 		{"SessionStart", "session-start", []string{"--format", "json"}},
 		{"BeforeAgent", "user-prompt", []string{"--format", "json", "--event-name", "BeforeAgent"}},
+	}},
+	{"qoder", ".qoder/settings.json", ".qoder", "", "qoder", []hookSpec{
+		{"SessionStart", "session-start", nil},
+		{"UserPromptSubmit", "user-prompt", nil},
+		{"Stop", "stop", nil},
 	}},
 }
 

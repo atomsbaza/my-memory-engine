@@ -480,6 +480,31 @@ func TestMCPKiroAndQoder(t *testing.T) {
 	}
 }
 
+func TestQoderHooksInstall(t *testing.T) {
+	f := newFixture(t)
+	qdir := filepath.Join(f.home, ".qoder")
+	if err := os.MkdirAll(qdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(qdir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{"theme":"dark","hooks":{"PreToolUse":[]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := f.run(t, "--all", "--yes"); code != ExitOK {
+		t.Fatalf("--all exit = %d, stderr=%s", code, stderr)
+	}
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{`"SessionStart"`, `"UserPromptSubmit"`, `"Stop"`, `"PreToolUse"`, `--agent qoder`} {
+		if !strings.Contains(text, want) {
+			t.Errorf(".qoder/settings.json missing %s:\n%s", want, text)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // opencode plugin / omp extension symlinks.
 // ---------------------------------------------------------------------------
