@@ -283,6 +283,70 @@ func TestTokensParity(t *testing.T) {
 	}
 }
 
+func TestSearchFTSThaiCompound(t *testing.T) {
+	home := t.TempDir()
+	ix, err := Open(IndexPath(home))
+	if err != nil {
+		t.Fatalf("open index: %v", err)
+	}
+	defer ix.Close()
+
+	recs := []store.Record{
+		{
+			ID:     "lesson.th1",
+			Rel:    "lessons/th1.md",
+			Layer:  "lesson",
+			Scope:  "global",
+			Status: "active",
+			Body:   "รายละเอียดการค้นหาความจำระยะยาว",
+			Front:  codec.Frontmatter{"title": "ค้นหาความจำระยะยาว", "created": "2026-11-25", "last_used": "2026-11-25"},
+		},
+	}
+	if err := ix.Rebuild(recs); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	ids, err := ix.Search("ความจำ", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "lesson.th1" {
+		t.Fatalf("Search(ความจำ) = %v, want [lesson.th1]", ids)
+	}
+}
+
+func TestSearchFTSThaiMixedBoundary(t *testing.T) {
+	home := t.TempDir()
+	ix, err := Open(IndexPath(home))
+	if err != nil {
+		t.Fatalf("open index: %v", err)
+	}
+	defer ix.Close()
+
+	recs := []store.Record{
+		{
+			ID:     "lesson.thmix",
+			Rel:    "lessons/thmix.md",
+			Layer:  "lesson",
+			Scope:  "global",
+			Status: "active",
+			Body:   "ค้นหาquick-sort_2ในระบบ",
+			Front:  codec.Frontmatter{"title": "mixed boundary", "created": "2026-11-25", "last_used": "2026-11-25"},
+		},
+	}
+	if err := ix.Rebuild(recs); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	for _, q := range []string{"quick", "ใน", "ค้นหา"} {
+		ids, err := ix.Search(q, 10)
+		if err != nil {
+			t.Fatalf("search %q: %v", q, err)
+		}
+		if len(ids) != 1 || ids[0] != "lesson.thmix" {
+			t.Fatalf("Search(%q) = %v, want [lesson.thmix]", q, ids)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AC-P1-08 — schema_version stamp
 // ---------------------------------------------------------------------------
@@ -300,8 +364,8 @@ func TestSchemaVersionStamp(t *testing.T) {
 	if err := ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&raw); err != nil {
 		t.Fatalf("meta.schema_version row: %v", err)
 	}
-	if raw != "1" {
-		t.Fatalf("meta.schema_version = %q, want %q", raw, "1")
+	if raw != "2" {
+		t.Fatalf("meta.schema_version = %q, want %q", raw, "2")
 	}
 	var ftsFlag string
 	if err := ix.db.QueryRow(`SELECT value FROM meta WHERE key = 'fts5'`).Scan(&ftsFlag); err != nil {
