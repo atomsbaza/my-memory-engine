@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/domain"
+	"github.com/atomsbaza/my-memory-engine/internal/priv"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
 )
 
@@ -302,6 +304,13 @@ func cmdShow(e *Env, c command, argv []string) int {
 	data, err := os.ReadFile(r.Path)
 	if err != nil {
 		return e.fail(err)
+	}
+	if priv.IsEncrypted(r.Body) {
+		if ids, ierr := priv.IdentitiesFromEnv(); ierr == nil && len(ids) > 0 {
+			if plain, derr := priv.Decrypt(r.Body, ids); derr == nil {
+				data = []byte(codec.DumpFront(r.Front) + "\n" + plain + "\n")
+			}
+		}
 	}
 	e.Stdout.Write(data)
 

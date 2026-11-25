@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/atomsbaza/my-memory-engine/internal/priv"
 	"unicode"
 	"unicode/utf8"
 
@@ -448,6 +450,18 @@ func Add(root string, rec store.Record, opts AddOptions) (AddResult, error) {
 	}
 	if len(opts.Contradicts) > 0 {
 		fm["contradicts"] = opts.Contradicts
+	}
+	if opts.Sensitivity == "private" && !priv.IsEncrypted(body) {
+		if recs := priv.RecipientsFromEnv(); len(recs) > 0 {
+			enc, eerr := priv.Encrypt(body, recs)
+			if eerr != nil {
+				return AddResult{}, fmt.Errorf("domain: add: encrypt private body: %w", eerr)
+			}
+			body = enc
+			bodySHA = ContentSHA256(body)
+		} else {
+			warnings = append(warnings, "เตือน — sensitivity=private แต่ไม่ได้ตั้ง MEM_AGE_RECIPIENT (บันทึกเป็น plaintext)")
+		}
 	}
 	if target != nil {
 		fm["supersedes"] = target.ID
