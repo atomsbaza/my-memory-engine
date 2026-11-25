@@ -59,12 +59,14 @@ type linkRow struct {
 // linksPayload is the single JSON document `--json` prints.
 type linksPayload struct {
 	Record struct {
-		ID     string `json:"id"`
-		Layer  string `json:"layer"`
-		Scope  string `json:"scope"`
-		Status string `json:"status"`
-		Title  string `json:"title"`
-		File   string `json:"file"`
+		ID        string `json:"id"`
+		Layer     string `json:"layer"`
+		Scope     string `json:"scope"`
+		Status    string `json:"status"`
+		Title     string `json:"title"`
+		File      string `json:"file"`
+		ValidFrom string `json:"valid_from,omitempty"`
+		ValidTo   string `json:"valid_to,omitempty"`
 	} `json:"record"`
 	Outbound []linkRow `json:"outbound"`
 	Inbound  []linkRow `json:"inbound"`
@@ -267,6 +269,11 @@ func linksOutbound(r store.Record) []linkRef {
 	add("superseded-by", stringField(r.Front, "superseded_by"))
 	add("promoted-from", stringField(r.Front, "promoted_from"))
 	add("compacted-into", stringField(r.Front, "compacted_into"))
+	if cs, ok := r.Front["contradicts"].([]string); ok {
+		for _, c := range cs {
+			add("contradicts", c)
+		}
+	}
 	if ev, ok := r.Front["evidence"].([]string); ok {
 		for _, e := range ev {
 			add("evidence", e)
@@ -349,6 +356,8 @@ func linksInvertKind(kind string) string {
 		return "superseded-by"
 	case "promoted-from":
 		return "promoted-to"
+	case "contradicts":
+		return "contradicted-by"
 	default:
 		return kind // evidence, body-ref, compacted-into are symmetric
 	}
