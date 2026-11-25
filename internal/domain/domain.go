@@ -523,10 +523,18 @@ func rewriteRecord(path, body string, fm codec.Frontmatter) error {
 	return store.AtomicWrite(path, []byte(text))
 }
 
-// ReindexRoot rebuilds the engine's derived index from the canonical
-// markdown tree (Python reindex(quiet=True)). Failures are returned, never
-// swallowed — the index is derived but a broken rebuild must be visible.
+// ReindexRoot incrementally syncs the engine's derived index from the
+// canonical markdown tree (falling back to full rebuild when stale/unbuilt).
 func ReindexRoot(root string) error {
+	return reindexRoot(root, false)
+}
+
+// ReindexRootFull forces a full drop-and-recreate index rebuild from disk.
+func ReindexRootFull(root string) error {
+	return reindexRoot(root, true)
+}
+
+func reindexRoot(root string, full bool) error {
 	rep, err := store.ScanWithReport(root)
 	if err != nil {
 		return fmt.Errorf("reindex: %w", err)
@@ -536,7 +544,11 @@ func ReindexRoot(root string) error {
 		return err
 	}
 	defer ix.Close()
-	return ix.Rebuild(rep.Records)
+	if full {
+		return ix.Rebuild(rep.Records)
+	}
+	_, err = ix.Sync(rep.Records)
+	return err
 }
 
 // rstripRunes trims trailing whitespace (Python str.rstrip()).
