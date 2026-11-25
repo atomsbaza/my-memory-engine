@@ -21,7 +21,9 @@
 package index
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -58,7 +60,7 @@ const (
 	// SchemaVersion is the derived-index schema generation this build
 	// writes. A file stamped with a different value is stale: rebuild it,
 	// never reuse it silently (AC-P1-09).
-	SchemaVersion = 2
+	SchemaVersion = 3
 
 	// pythonIndexName is the Python engine's index file. This engine must
 	// not open it for writing — REQ-IDX-01 forbids touching it.
@@ -226,9 +228,12 @@ func (ix *Index) Rebuild(records []store.Record) error {
 	for _, stmt := range []string{
 		`DROP TABLE IF EXISTS rec`,
 		`DROP TABLE IF EXISTS fts`,
+		`DROP TABLE IF EXISTS rec_digest`,
 		`DROP TABLE IF EXISTS meta`,
 		`CREATE TABLE rec (id TEXT, path TEXT, layer TEXT, scope TEXT, status TEXT, ` +
 			`title TEXT, tags TEXT, created TEXT, last_used TEXT, body TEXT)`,
+		`CREATE INDEX idx_rec_id ON rec(id)`,
+		`CREATE TABLE rec_digest (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL)`,
 		`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -247,6 +252,11 @@ func (ix *Index) Rebuild(records []store.Record) error {
 		return fmt.Errorf("index: rebuild %s: prepare rec insert: %w", ix.path, err)
 	}
 	defer insRec.Close()
+	insDig, err := tx.Prepare(`INSERT INTO rec_digest VALUES (?,?)`)
+	if err != nil {
+		return fmt.Errorf("index: rebuild %s: prepare digest insert: %w", ix.path, err)
+	}
+	defer insDig.Close()
 	var insFts *sql.Stmt
 	if fts {
 		if insFts, err = tx.Prepare(`INSERT INTO fts VALUES (?,?,?,?)`); err != nil {
@@ -261,9 +271,14 @@ func (ix *Index) Rebuild(records []store.Record) error {
 		// and str() semantics for created/last_used.
 		title := frontString(r.Front, "title")
 		tags := strings.Join(r.Tags, " ")
+		created := frontString(r.Front, "created")
+		lastUsed := frontString(r.Front, "last_used")
 		if _, err := insRec.Exec(r.ID, r.Rel, r.Layer, r.Scope, r.Status, title, tags,
-			frontString(r.Front, "created"), frontString(r.Front, "last_used"), r.Body); err != nil {
+			created, lastUsed, r.Body); err != nil {
 			return fmt.Errorf("index: rebuild %s: insert rec %s: %w", ix.path, r.ID, err)
+		}
+		if _, err := insDig.Exec(r.ID, recordDigest(r, title, tags, created, lastUsed)); err != nil {
+			return fmt.Errorf("index: rebuild %s: insert digest %s: %w", ix.path, r.ID, err)
 		}
 		if fts {
 			if _, err := insFts.Exec(r.ID, tok.SegmentForFTS(title), tok.SegmentForFTS(r.Body), tok.SegmentForFTS(tags)); err != nil {
@@ -292,6 +307,194 @@ func (ix *Index) Rebuild(records []store.Record) error {
 	}
 	ix.fts = fts
 	return nil
+}
+
+// SyncStats summarizes an incremental Sync pass.
+type SyncStats struct {
+	Added       int
+	Updated     int
+	Deleted     int
+	Total       int
+	FullRebuild bool
+}
+
+func recordDigest(r store.Record, title, tags, created, lastUsed string) string {
+	h := sha256.New()
+	for _, s := range []string{r.ID, r.Rel, r.Layer, r.Scope, r.Status, title, tags, created, lastUsed, r.Body} {
+		h.Write([]byte(s))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Sync incrementally updates the index to match records using SHA-256 digests
+// stored in rec_digest. It falls back to Rebuild when the index is unbuilt,
+// stale, or missing rec_digest.
+func (ix *Index) Sync(records []store.Record) (SyncStats, error) {
+	v, ok, err := ix.Version()
+	if err != nil || !ok || v != SchemaVersion {
+		if rerr := ix.Rebuild(records); rerr != nil {
+			return SyncStats{}, rerr
+		}
+		return SyncStats{Total: len(records), FullRebuild: true}, nil
+	}
+
+	var hasDigest int
+	if err := ix.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='rec_digest'`).Scan(&hasDigest); err != nil || hasDigest == 0 {
+		if rerr := ix.Rebuild(records); rerr != nil {
+			return SyncStats{}, rerr
+		}
+		return SyncStats{Total: len(records), FullRebuild: true}, nil
+	}
+
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return SyncStats{}, fmt.Errorf("index: sync %s: begin: %w", ix.path, err)
+	}
+	defer tx.Rollback()
+
+	existing := make(map[string]string, len(records))
+	rows, err := tx.Query(`SELECT id, sha256 FROM rec_digest`)
+	if err != nil {
+		return SyncStats{}, fmt.Errorf("index: sync %s: read digests: %w", ix.path, err)
+	}
+	for rows.Next() {
+		var id, sum string
+		if err := rows.Scan(&id, &sum); err != nil {
+			rows.Close()
+			return SyncStats{}, fmt.Errorf("index: sync %s: scan digest: %w", ix.path, err)
+		}
+		existing[id] = sum
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return SyncStats{}, fmt.Errorf("index: sync %s: iter digests: %w", ix.path, err)
+	}
+	rows.Close()
+
+	type recEntry struct {
+		rec      store.Record
+		title    string
+		tags     string
+		created  string
+		lastUsed string
+		digest   string
+		isUpdate bool
+	}
+
+	seen := make(map[string]struct{}, len(records))
+	var upserts []recEntry
+	added, updated := 0, 0
+	for _, r := range records {
+		seen[r.ID] = struct{}{}
+		title := frontString(r.Front, "title")
+		tags := strings.Join(r.Tags, " ")
+		created := frontString(r.Front, "created")
+		lastUsed := frontString(r.Front, "last_used")
+		dig := recordDigest(r, title, tags, created, lastUsed)
+		prev, exists := existing[r.ID]
+		if !exists {
+			added++
+			upserts = append(upserts, recEntry{r, title, tags, created, lastUsed, dig, false})
+		} else if prev != dig {
+			updated++
+			upserts = append(upserts, recEntry{r, title, tags, created, lastUsed, dig, true})
+		}
+	}
+
+	var deletes []string
+	for id := range existing {
+		if _, ok := seen[id]; !ok {
+			deletes = append(deletes, id)
+		}
+	}
+
+	if len(upserts) == 0 && len(deletes) == 0 {
+		return SyncStats{Total: len(records)}, nil
+	}
+
+	delRec, err := tx.Prepare(`DELETE FROM rec WHERE id = ?`)
+	if err != nil {
+		return SyncStats{}, err
+	}
+	defer delRec.Close()
+	delDig, err := tx.Prepare(`DELETE FROM rec_digest WHERE id = ?`)
+	if err != nil {
+		return SyncStats{}, err
+	}
+	defer delDig.Close()
+	var delFts *sql.Stmt
+	if ix.fts {
+		if delFts, err = tx.Prepare(`DELETE FROM fts WHERE id = ?`); err != nil {
+			return SyncStats{}, err
+		}
+		defer delFts.Close()
+	}
+
+	for _, id := range deletes {
+		if _, err := delRec.Exec(id); err != nil {
+			return SyncStats{}, err
+		}
+		if _, err := delDig.Exec(id); err != nil {
+			return SyncStats{}, err
+		}
+		if ix.fts {
+			if _, err := delFts.Exec(id); err != nil {
+				return SyncStats{}, err
+			}
+		}
+	}
+
+	insRec, err := tx.Prepare(`INSERT INTO rec VALUES (?,?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return SyncStats{}, err
+	}
+	defer insRec.Close()
+	insDig, err := tx.Prepare(`INSERT INTO rec_digest VALUES (?,?)`)
+	if err != nil {
+		return SyncStats{}, err
+	}
+	defer insDig.Close()
+	var insFts *sql.Stmt
+	if ix.fts {
+		if insFts, err = tx.Prepare(`INSERT INTO fts VALUES (?,?,?,?)`); err != nil {
+			return SyncStats{}, err
+		}
+		defer insFts.Close()
+	}
+
+	for _, u := range upserts {
+		if u.isUpdate {
+			if _, err := delRec.Exec(u.rec.ID); err != nil {
+				return SyncStats{}, err
+			}
+			if _, err := delDig.Exec(u.rec.ID); err != nil {
+				return SyncStats{}, err
+			}
+			if ix.fts {
+				if _, err := delFts.Exec(u.rec.ID); err != nil {
+					return SyncStats{}, err
+				}
+			}
+		}
+		if _, err := insRec.Exec(u.rec.ID, u.rec.Rel, u.rec.Layer, u.rec.Scope, u.rec.Status,
+			u.title, u.tags, u.created, u.lastUsed, u.rec.Body); err != nil {
+			return SyncStats{}, err
+		}
+		if _, err := insDig.Exec(u.rec.ID, u.digest); err != nil {
+			return SyncStats{}, err
+		}
+		if ix.fts {
+			if _, err := insFts.Exec(u.rec.ID, tok.SegmentForFTS(u.title), tok.SegmentForFTS(u.rec.Body), tok.SegmentForFTS(u.tags)); err != nil {
+				return SyncStats{}, err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return SyncStats{}, fmt.Errorf("index: sync %s: commit: %w", ix.path, err)
+	}
+	return SyncStats{Added: added, Updated: updated, Deleted: len(deletes), Total: len(records)}, nil
 }
 
 // ---------------------------------------------------------------------------

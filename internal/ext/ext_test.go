@@ -73,3 +73,94 @@ func TestExternalVaultAddListReindexSearchRemove(t *testing.T) {
 		t.Fatalf("after remove LoadConfig = %+v, err=%v", cfg, err)
 	}
 }
+
+func TestExtReindexIncremental(t *testing.T) {
+	home := t.TempDir()
+	vault := t.TempDir()
+	p1 := filepath.Join(vault, "a.md")
+	p2 := filepath.Join(vault, "b.md")
+	if err := os.WriteFile(p1, []byte("# Note A\nalpha content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p2, []byte("# Note B\nbravo content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddVault(home, "v", vault); err != nil {
+		t.Fatal(err)
+	}
+
+	r1, err := Reindex(home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r1.Updated != 2 || r1.Skipped != 0 {
+		t.Fatalf("r1 = %+v, want Updated=2 Skipped=0", r1)
+	}
+
+	// Second pass: no file changed -> all skipped.
+	r2, err := Reindex(home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Skipped != 2 || r2.Updated != 0 || r2.Deleted != 0 {
+		t.Fatalf("r2 = %+v, want Skipped=2 Updated=0 Deleted=0", r2)
+	}
+
+	// Update a.md and delete b.md.
+	if err := os.WriteFile(p1, []byte("# Note A\nupdated zeta content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p2); err != nil {
+		t.Fatal(err)
+	}
+
+	r3, err := Reindex(home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r3.Updated != 1 || r3.Deleted != 1 {
+		t.Fatalf("r3 = %+v, want Updated=1 Deleted=1", r3)
+	}
+	if hits, err := Search(home, "zeta", "", 5); err != nil || len(hits) != 1 {
+		t.Fatalf("search zeta = %+v, %v", hits, err)
+	}
+	if hits, err := Search(home, "bravo", "", 5); err != nil || len(hits) != 0 {
+		t.Fatalf("deleted bravo still found = %+v, %v", hits, err)
+	}
+}
+
+func TestExtReindexOnlyVaultPreservesOthers(t *testing.T) {
+	home := t.TempDir()
+	v1 := t.TempDir()
+	v2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(v1, "one.md"), []byte("# V1\nalpha"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v2, "two.md"), []byte("# V2\nbeta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddVault(home, "v1", v1); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddVault(home, "v2", v2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reindex(home, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Modify v1 and reindex only v1; v2 must remain searchable.
+	if err := os.WriteFile(filepath.Join(v1, "one.md"), []byte("# V1\ngamma"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Reindex(home, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Vaults != 1 || res.Updated != 1 || res.Chunks != 1 {
+		t.Fatalf("onlyVault reindex = %+v, want Vaults=1 Updated=1 Chunks=1", res)
+	}
+	if hits, err := Search(home, "beta", "v2", 5); err != nil || len(hits) != 1 {
+		t.Fatalf("v2 should still be searchable, got %+v, %v", hits, err)
+	}
+}

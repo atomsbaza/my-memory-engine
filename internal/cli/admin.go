@@ -181,6 +181,7 @@ func runGitInit(root string) (string, error) {
 // configured it re-embeds every record chunk and prints the mode it used.
 func cmdReindex(e *Env, c command, argv []string) int {
 	fs := e.flagSet(c)
+	full := fs.Bool("full", false, "บังคับ rebuild index ใหม่ทั้งหมด")
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
 		return code
 	}
@@ -193,8 +194,14 @@ func cmdReindex(e *Env, c command, argv []string) int {
 		return e.fail(err)
 	}
 	cfg := sch.Embedding.WithDefaults()
-	if err := domain.ReindexRoot(root); err != nil {
-		return e.fail(err)
+	var rerr error
+	if *full {
+		rerr = domain.ReindexRootFull(root)
+	} else {
+		rerr = domain.ReindexRoot(root)
+	}
+	if rerr != nil {
+		return e.fail(rerr)
 	}
 	recs, err := e.scan(root)
 	if err != nil {

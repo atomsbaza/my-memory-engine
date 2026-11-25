@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/atomsbaza/my-memory-engine/internal/ext"
 )
@@ -104,22 +105,31 @@ func (e *Env) extRm(argv []string) int {
 
 func (e *Env) extReindex(argv []string) int {
 	only := ""
-	if len(argv) > 1 {
-		fmt.Fprintln(e.Stderr, "usage: mem ext reindex [<name>]")
-		return ExitGuard
-	}
-	if len(argv) == 1 {
-		only = argv[0]
+	full := false
+	for _, a := range argv {
+		switch {
+		case a == "--full":
+			full = true
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintln(e.Stderr, "usage: mem ext reindex [<name>] [--full]")
+			return ExitGuard
+		case only == "":
+			only = a
+		default:
+			fmt.Fprintln(e.Stderr, "usage: mem ext reindex [<name>] [--full]")
+			return ExitGuard
+		}
 	}
 	root, err := e.root()
 	if err != nil {
 		return e.fail(err)
 	}
-	res, err := ext.Reindex(root, only)
+	res, err := ext.ReindexWithOptions(root, only, full)
 	if err != nil {
 		return e.fail(err)
 	}
-	fmt.Fprintf(e.Stdout, "ext index: %d vaults · %d files · %d chunks\n", res.Vaults, res.Files, res.Chunks)
+	fmt.Fprintf(e.Stdout, "ext index: %d vaults · %d files (%d skipped, %d updated, %d deleted) · %d chunks\n",
+		res.Vaults, res.Files, res.Skipped, res.Updated, res.Deleted, res.Chunks)
 	return ExitOK
 }
 
