@@ -11,6 +11,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -459,7 +460,7 @@ func (s *server) handleOutcome(_ context.Context, _ *mcpsdk.CallToolRequest, in 
 // memory_add
 // ---------------------------------------------------------------------------
 
-func (s *server) handleAdd(_ context.Context, _ *mcpsdk.CallToolRequest, in AddArgs) (*mcpsdk.CallToolResult, any, error) {
+func (s *server) handleAdd(ctx context.Context, req *mcpsdk.CallToolRequest, in AddArgs) (*mcpsdk.CallToolResult, any, error) {
 	text := strings.TrimSpace(in.Text)
 	if text == "" {
 		return result("", "ต้องส่ง text", true)
@@ -493,7 +494,7 @@ func (s *server) handleAdd(_ context.Context, _ *mcpsdk.CallToolRequest, in AddA
 		source = s.defaultSource()
 	}
 
-	res, err := domain.Add(s.root, store.Record{Layer: layer, Scope: scope, Body: text}, domain.AddOptions{
+	opts := domain.AddOptions{
 		Title:       in.Title,
 		Tags:        in.Tags,
 		Confidence:  confidence,
@@ -506,7 +507,47 @@ func (s *server) handleAdd(_ context.Context, _ *mcpsdk.CallToolRequest, in AddA
 		Expires:     expires,
 		Sensitivity: sensitivity,
 		Force:       in.Force,
-	})
+	}
+	if req != nil && req.Params != nil && len(req.Params.InputResponses) > 0 {
+		if resp, ok := req.Params.InputResponses["conflict"].(*mcpsdk.ElicitResult); ok {
+			if resp.Action != "accept" {
+				return result("", "ยกเลิกการเขียน (write conflict cancelled)", true)
+			}
+			choice, _ := resp.Content["resolution"].(string)
+			switch choice {
+			case "supersede":
+				opts.Supersede = true
+			case "force":
+				opts.Force = true
+			default:
+				return result("", "ยกเลิกการเขียน (write conflict cancelled)", true)
+			}
+		}
+	}
+	res, err := domain.Add(s.root, store.Record{Layer: layer, Scope: scope, Body: text}, opts)
+	var derr *domain.Error
+	if err != nil && errors.As(err, &derr) && derr.Code == 3 && req != nil && req.Session != nil && !opts.Supersede && !opts.Force {
+		if ip := req.Session.InitializeParams(); ip != nil && ip.Capabilities != nil && ip.Capabilities.Elicitation != nil {
+			return &mcpsdk.CallToolResult{
+				InputRequests: mcpsdk.InputRequestMap{
+					"conflict": &mcpsdk.ElicitParams{
+						Mode:    "form",
+						Message: err.Error(),
+						RequestedSchema: map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"resolution": map[string]any{
+									"type": "string",
+									"enum": []string{"supersede", "force", "cancel"},
+								},
+							},
+							"required": []string{"resolution"},
+						},
+					},
+				},
+			}, nil, nil
+		}
+	}
 	if err != nil {
 		return result("", err.Error(), true)
 	}
