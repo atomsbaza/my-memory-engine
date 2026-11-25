@@ -232,6 +232,7 @@ func (ix *Index) Rebuild(records []store.Record) error {
 		`DROP TABLE IF EXISTS meta`,
 		`CREATE TABLE rec (id TEXT, path TEXT, layer TEXT, scope TEXT, status TEXT, ` +
 			`title TEXT, tags TEXT, created TEXT, last_used TEXT, body TEXT)`,
+		`CREATE INDEX idx_rec_id ON rec(id)`,
 		`CREATE TABLE rec_digest (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL)`,
 		`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 	} {
@@ -346,8 +347,14 @@ func (ix *Index) Sync(records []store.Record) (SyncStats, error) {
 		return SyncStats{Total: len(records), FullRebuild: true}, nil
 	}
 
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return SyncStats{}, fmt.Errorf("index: sync %s: begin: %w", ix.path, err)
+	}
+	defer tx.Rollback()
+
 	existing := make(map[string]string, len(records))
-	rows, err := ix.db.Query(`SELECT id, sha256 FROM rec_digest`)
+	rows, err := tx.Query(`SELECT id, sha256 FROM rec_digest`)
 	if err != nil {
 		return SyncStats{}, fmt.Errorf("index: sync %s: read digests: %w", ix.path, err)
 	}
@@ -405,12 +412,6 @@ func (ix *Index) Sync(records []store.Record) (SyncStats, error) {
 	if len(upserts) == 0 && len(deletes) == 0 {
 		return SyncStats{Total: len(records)}, nil
 	}
-
-	tx, err := ix.db.Begin()
-	if err != nil {
-		return SyncStats{}, fmt.Errorf("index: sync %s: begin: %w", ix.path, err)
-	}
-	defer tx.Rollback()
 
 	delRec, err := tx.Prepare(`DELETE FROM rec WHERE id = ?`)
 	if err != nil {

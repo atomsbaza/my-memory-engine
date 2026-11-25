@@ -128,3 +128,39 @@ func TestExtReindexIncremental(t *testing.T) {
 		t.Fatalf("deleted bravo still found = %+v, %v", hits, err)
 	}
 }
+
+func TestExtReindexOnlyVaultPreservesOthers(t *testing.T) {
+	home := t.TempDir()
+	v1 := t.TempDir()
+	v2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(v1, "one.md"), []byte("# V1\nalpha"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v2, "two.md"), []byte("# V2\nbeta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddVault(home, "v1", v1); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddVault(home, "v2", v2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reindex(home, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Modify v1 and reindex only v1; v2 must remain searchable.
+	if err := os.WriteFile(filepath.Join(v1, "one.md"), []byte("# V1\ngamma"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Reindex(home, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Vaults != 1 || res.Updated != 1 || res.Chunks != 1 {
+		t.Fatalf("onlyVault reindex = %+v, want Vaults=1 Updated=1 Chunks=1", res)
+	}
+	if hits, err := Search(home, "beta", "v2", 5); err != nil || len(hits) != 1 {
+		t.Fatalf("v2 should still be searchable, got %+v, %v", hits, err)
+	}
+}

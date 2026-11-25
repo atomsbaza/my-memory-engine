@@ -408,6 +408,7 @@ func ReindexWithOptions(home, onlyVault string, full bool) (ReindexResult, error
 			`DROP TABLE IF EXISTS ext_chunks`,
 			`DROP TABLE IF EXISTS ext_files`,
 			`CREATE TABLE ext_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, vault TEXT NOT NULL, rel_path TEXT NOT NULL, heading TEXT NOT NULL, body TEXT NOT NULL)`,
+			`CREATE INDEX idx_ext_chunks_vault_path ON ext_chunks(vault, rel_path)`,
 			`CREATE TABLE ext_files (vault TEXT NOT NULL, rel_path TEXT NOT NULL, mtime_ns INTEGER NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY (vault, rel_path))`,
 			`CREATE VIRTUAL TABLE ext_fts USING fts5(chunk_id UNINDEXED, vault UNINDEXED, rel_path, heading, body, tokenize='unicode61')`,
 		} {
@@ -418,7 +419,7 @@ func ReindexWithOptions(home, onlyVault string, full bool) (ReindexResult, error
 	}
 
 	if !full && (len(deletes) > 0 || len(updates) > 0) {
-		delFTS, err := tx.Prepare(`DELETE FROM ext_fts WHERE chunk_id IN (SELECT id FROM ext_chunks WHERE vault = ? AND rel_path = ?)`)
+		delFTS, err := tx.Prepare(`DELETE FROM ext_fts WHERE rowid IN (SELECT id FROM ext_chunks WHERE vault = ? AND rel_path = ?)`)
 		if err != nil {
 			return ReindexResult{}, err
 		}
@@ -480,7 +481,7 @@ func ReindexWithOptions(home, onlyVault string, full bool) (ReindexResult, error
 			return ReindexResult{}, err
 		}
 		defer insChunk.Close()
-		insFTS, err := tx.Prepare(`INSERT INTO ext_fts (chunk_id, vault, rel_path, heading, body) VALUES (?,?,?,?,?)`)
+		insFTS, err := tx.Prepare(`INSERT INTO ext_fts (rowid, chunk_id, vault, rel_path, heading, body) VALUES (?,?,?,?,?,?)`)
 		if err != nil {
 			return ReindexResult{}, err
 		}
@@ -504,7 +505,7 @@ func ReindexWithOptions(home, onlyVault string, full bool) (ReindexResult, error
 				if err != nil {
 					return ReindexResult{}, err
 				}
-				if _, err := insFTS.Exec(cid, c.vault, c.relPath, tok.SegmentForFTS(c.heading), tok.SegmentForFTS(c.body)); err != nil {
+				if _, err := insFTS.Exec(cid, cid, c.vault, c.relPath, tok.SegmentForFTS(c.heading), tok.SegmentForFTS(c.body)); err != nil {
 					return ReindexResult{}, err
 				}
 			}
@@ -512,14 +513,20 @@ func ReindexWithOptions(home, onlyVault string, full bool) (ReindexResult, error
 	}
 
 	var totalChunks int
-	if err := tx.QueryRow(`SELECT count(*) FROM ext_chunks`).Scan(&totalChunks); err != nil {
-		return ReindexResult{}, err
+	if !full && onlyVault != "" {
+		if err := tx.QueryRow(`SELECT count(*) FROM ext_chunks WHERE vault = ?`, onlyVault).Scan(&totalChunks); err != nil {
+			return ReindexResult{}, err
+		}
+	} else {
+		if err := tx.QueryRow(`SELECT count(*) FROM ext_chunks`).Scan(&totalChunks); err != nil {
+			return ReindexResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return ReindexResult{}, err
 	}
 	return ReindexResult{
-		Vaults:  len(cfg.Vaults),
+		Vaults:  len(walkVaults),
 		Files:   fileCount,
 		Skipped: skipped,
 		Updated: len(updates),
