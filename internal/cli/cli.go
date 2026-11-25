@@ -46,14 +46,13 @@ const (
 	// LegacyCommandCount is the Python baseline's add_parser count.
 	LegacyCommandCount = 21
 	// CommandCount is the full surface: 21 legacy families + init + doctor
-	// + embed + links + graph + outcome + ext (both explorers, outcome, and
-	// external vault index are engine-only additive surfaces).
-	CommandCount = LegacyCommandCount + 7
+	// + embed + links + graph + outcome + ext + maintain.
+	CommandCount = LegacyCommandCount + 8
 )
 
 // usage is the top-level usage line; mirrors Python mem's argparse banner with
 // the engine-only commands appended.
-const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,links,graph,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed,outcome,ext} ..."
+const usage = "usage: mem [-h] [--home HOME] {context,search,list,show,links,graph,add,touch,cite,review,supersede,verify,reindex,archive,promote,compact,render,sync,import,hook,stats,eval,mcp,init,doctor,embed,outcome,ext,maintain} ..."
 
 // banner is the one-line description printed under usage.
 const banner = "portable agent memory (markdown + git)"
@@ -116,6 +115,7 @@ var commands = []command{
 	{Entry: Entry{Name: "embed", Args: "status | set <off|ollama> [--model M] [--base-url U]", Help: "ดู/ตั้ง embedding mode (off = default, ollama = semantic search ท้องถิ่น)"}, run: cmdEmbed},
 	{Entry: Entry{Name: "outcome", Args: "<id> [--fixed T] [--missed T] [--note T]", Help: "บันทึกผลที่วัดได้ของ record (observed = fixed/missed/note — SIM predicted vs observed; ไม่แตะ uses)"}, run: cmdOutcome},
 	{Entry: Entry{Name: "ext", Args: "add <name> <path> | list | rm <name> | reindex [<name>] | search <query>", Help: "จัดการและค้นหา external markdown vault index (read-only)"}, run: cmdExt},
+	{Entry: Entry{Name: "maintain", Args: "[--dry-run] [--json]", Help: "รัน sleep-time consolidation pipeline (verify + compact + archive + promote-scan + reindex)"}, run: cmdMaintain},
 }
 
 // Manifest returns the command surface in registry order. Exported for the
