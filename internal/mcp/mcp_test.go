@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/atomsbaza/my-memory-engine/internal/ext"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -666,8 +667,8 @@ func TestResourcesListStaticAndTemplates(t *testing.T) {
 	for _, rt := range tmpls.ResourceTemplates {
 		got[rt.URITemplate] = true
 	}
-	if !got[RecordURITemplate] || !got[ContextURITemplate] || len(tmpls.ResourceTemplates) != 2 {
-		t.Fatalf("resource templates = %v, want exactly record + context", got)
+	if !got[RecordURITemplate] || !got[ContextURITemplate] || !got[ExternalURITemplate] || len(tmpls.ResourceTemplates) != 3 {
+		t.Fatalf("resource templates = %v, want record + context + external", got)
 	}
 }
 
@@ -797,6 +798,29 @@ func TestContextResourceBudgetClamp(t *testing.T) {
 	uri := "memory://context?q=test&budget=many"
 	if _, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: uri}); err == nil {
 		t.Error("non-numeric budget must be a resource error")
+	}
+}
+
+func TestExternalResource(t *testing.T) {
+	home := fixtureHome(t, false)
+	vault := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vault, "guide.md"), []byte("# Deploy\nUse GoReleaser for tagged builds\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext.AddVault(home, "notes", vault); err != nil {
+		t.Fatalf("AddVault: %v", err)
+	}
+	if _, err := ext.Reindex(home, ""); err != nil {
+		t.Fatalf("Reindex: %v", err)
+	}
+
+	cs := newSession(t, home)
+	res, err := cs.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{URI: "memory://external?q=GoReleaser&limit=5"})
+	if err != nil {
+		t.Fatalf("resources/read external: %v", err)
+	}
+	if len(res.Contents) != 1 || !strings.Contains(res.Contents[0].Text, "guide.md") {
+		t.Fatalf("unexpected external resource payload: %+v", res.Contents)
 	}
 }
 

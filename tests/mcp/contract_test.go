@@ -747,9 +747,9 @@ func TestResourcesContract(t *testing.T) {
 	for _, rt := range tmplList.ResourceTemplates {
 		tmpls[rt.URITemplate] = true
 	}
-	if len(tmplList.ResourceTemplates) != 2 || !tmpls["memory://record/{id}"] ||
-		!tmpls["memory://context{?q,scope,budget}"] {
-		t.Fatalf("resources/templates/list = %v, want record + context templates", tmpls)
+	if len(tmplList.ResourceTemplates) != 3 || !tmpls["memory://record/{id}"] ||
+		!tmpls["memory://context{?q,scope,budget}"] || !tmpls["memory://external{?q,vault,limit}"] {
+		t.Fatalf("resources/templates/list = %v, want record + context + external templates", tmpls)
 	}
 
 	var readRes struct {
