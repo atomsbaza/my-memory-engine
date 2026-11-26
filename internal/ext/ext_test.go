@@ -3,7 +3,11 @@ package ext
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/atomsbaza/my-memory-engine/internal/codec"
+	"github.com/atomsbaza/my-memory-engine/internal/store"
 )
 
 func TestExternalVaultAddListReindexSearchRemove(t *testing.T) {
@@ -162,5 +166,34 @@ func TestExtReindexOnlyVaultPreservesOthers(t *testing.T) {
 	}
 	if hits, err := Search(home, "beta", "v2", 5); err != nil || len(hits) != 1 {
 		t.Fatalf("v2 should still be searchable, got %+v, %v", hits, err)
+	}
+}
+
+func TestExtCheckPointersBrokenLinks(t *testing.T) {
+	home := t.TempDir()
+	vault := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vault, "ExistingNote.md"), []byte("# Existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddVault(home, "obsidian", vault); err != nil {
+		t.Fatal(err)
+	}
+	recs := []store.Record{
+		{
+			ID: "lesson.p1", Rel: "lessons/p1.md", Status: "active",
+			Front: codec.Frontmatter{"title": "Pointers"},
+			Body:  "valid: vault://obsidian/ExistingNote and [[ExistingNote]]\nbroken: vault://obsidian/Missing and [[GhostNote]]",
+		},
+	}
+	warns, err := CheckPointers(home, recs)
+	if err != nil {
+		t.Fatalf("CheckPointers: %v", err)
+	}
+	if len(warns) != 2 {
+		t.Fatalf("expected 2 broken-pointer warnings, got %d: %v", len(warns), warns)
+	}
+	joined := strings.Join(warns, "\n")
+	if !strings.Contains(joined, "Missing") || !strings.Contains(joined, "GhostNote") {
+		t.Fatalf("unexpected warnings: %v", warns)
 	}
 }

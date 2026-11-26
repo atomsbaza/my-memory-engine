@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/atomsbaza/my-memory-engine/internal/domain"
+	"github.com/atomsbaza/my-memory-engine/internal/ext"
 	"github.com/atomsbaza/my-memory-engine/internal/index"
 	"github.com/atomsbaza/my-memory-engine/internal/schema"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
@@ -64,10 +65,11 @@ func (e *Env) ftsSeam(root string, rebuild bool) (func(string, int) ([]string, e
 // contextRequest is the shared input of `mem context` and the session-start
 // hook (Python run_cmd(cmd_context) reuse).
 type contextRequest struct {
-	Scope    string
-	Query    string
-	Budget   int
-	PackMode string
+	Scope        string
+	Query        string
+	Budget       int
+	PackMode     string
+	WithExternal bool
 }
 
 // contextText renders the memory block for one scope. It returns the rendered
@@ -88,15 +90,29 @@ func (e *Env) contextText(root string, o contextRequest) (string, []store.Record
 	}
 	defer closer()
 	scoring := sch.Scoring
+	var extHits []domain.ExternalHit
+	if o.WithExternal && o.Query != "" {
+		if hits, herr := ext.Search(root, o.Query, "", 5); herr == nil {
+			for _, h := range hits {
+				extHits = append(extHits, domain.ExternalHit{
+					Vault:   h.Vault,
+					Path:    h.RelPath,
+					Heading: h.Heading,
+					Snippet: h.Snippet,
+				})
+			}
+		}
+	}
 	text, touched, err := domain.RenderContext(recs, domain.ContextOptions{
-		Root:     root,
-		Scope:    o.Scope,
-		Query:    o.Query,
-		Budget:   o.Budget,
-		PackMode: o.PackMode,
-		Scoring:  &scoring,
-		FTS:      fts,
-		Indexed:  fts != nil,
+		Root:         root,
+		Scope:        o.Scope,
+		Query:        o.Query,
+		Budget:       o.Budget,
+		PackMode:     o.PackMode,
+		ExternalHits: extHits,
+		Scoring:      &scoring,
+		FTS:          fts,
+		Indexed:      fts != nil,
 	})
 	if err != nil {
 		return "", nil, err

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/atomsbaza/my-memory-engine/internal/store"
 	"github.com/atomsbaza/my-memory-engine/internal/tok"
 	_ "modernc.org/sqlite"
 )
@@ -612,4 +613,90 @@ func clipSnippet(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "…"
+}
+
+var (
+	vaultURIRe = regexp.MustCompile(`vault://([A-Za-z0-9_-]+)/([^\s)\]>]+)`)
+	wikilinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]`)
+)
+
+// CheckPointers verifies vault://<name>/<path> and [[wikilink]] references in
+// active records against registered external vaults, returning advisory warnings
+// for broken targets.
+func CheckPointers(home string, recs []store.Record) ([]string, error) {
+	cfg, err := LoadConfig(home)
+	if err != nil {
+		return nil, err
+	}
+	if len(cfg.Vaults) == 0 {
+		return nil, nil
+	}
+
+	vaultFiles := make(map[string]map[string]bool, len(cfg.Vaults))
+	baseNames := make(map[string]bool)
+	for _, v := range cfg.Vaults {
+		files := map[string]bool{}
+		err := filepath.WalkDir(v.Path, func(p string, d fs.DirEntry, werr error) error {
+			if werr != nil {
+				return werr
+			}
+			if d.IsDir() {
+				name := d.Name()
+				if strings.HasPrefix(name, ".") || name == "node_modules" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.EqualFold(filepath.Ext(d.Name()), ".md") {
+				return nil
+			}
+			rel, rerr := filepath.Rel(v.Path, p)
+			if rerr != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			files[strings.ToLower(rel)] = true
+			base := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+			baseNames[strings.ToLower(base)] = true
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ext: check pointers walk %s: %w", v.Name, err)
+		}
+		vaultFiles[v.Name] = files
+	}
+
+	internalTargets := make(map[string]bool, len(recs)*2)
+	for _, r := range recs {
+		internalTargets[strings.ToLower(r.ID)] = true
+		if t, ok := r.Front["title"].(string); ok && t != "" {
+			internalTargets[strings.ToLower(t)] = true
+		}
+	}
+
+	var warnings []string
+	for _, r := range recs {
+		if r.Status != "active" {
+			continue
+		}
+		for _, m := range vaultURIRe.FindAllStringSubmatch(r.Body, -1) {
+			vName, rel := m[1], strings.ToLower(m[2])
+			files, ok := vaultFiles[vName]
+			if !ok {
+				warnings = append(warnings, fmt.Sprintf("%s: broken vault:// pointer (unknown vault %q): %s", r.Rel, vName, m[0]))
+				continue
+			}
+			if !files[rel] && !files[rel+".md"] {
+				warnings = append(warnings, fmt.Sprintf("%s: broken vault:// pointer (missing file): %s", r.Rel, m[0]))
+			}
+		}
+		for _, m := range wikilinkRe.FindAllStringSubmatch(r.Body, -1) {
+			target := strings.ToLower(strings.TrimSpace(m[1]))
+			if target == "" || internalTargets[target] || baseNames[target] {
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf("%s: broken [[wikilink]] pointer: %s", r.Rel, m[0]))
+		}
+	}
+	return warnings, nil
 }

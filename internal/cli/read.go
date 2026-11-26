@@ -11,6 +11,7 @@ import (
 
 	"github.com/atomsbaza/my-memory-engine/internal/codec"
 	"github.com/atomsbaza/my-memory-engine/internal/domain"
+	"github.com/atomsbaza/my-memory-engine/internal/ext"
 	"github.com/atomsbaza/my-memory-engine/internal/priv"
 	"github.com/atomsbaza/my-memory-engine/internal/store"
 )
@@ -26,6 +27,7 @@ func cmdContext(e *Env, c command, argv []string) int {
 	query := fs.String("query", "", "คำค้น")
 	budget := fs.Int("budget", 0, "budget chars รวม")
 	pack := fs.String("pack", "", "โหมดจัดสรรงบ (default | knapsack)")
+	withExternal := fs.Bool("with-external", false, "แทรก external vault pointers เข้าไปในงบที่เหลือ")
 	noTouch := fs.Bool("no-touch", false, "ไม่ต้อง bump last_used")
 	quiet := fs.Bool("quiet", false, "ไม่ต้องรายงานว่า touch กี่ record")
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
@@ -41,7 +43,7 @@ func cmdContext(e *Env, c command, argv []string) int {
 		scopeVal = "project:" + *project
 	}
 
-	text, touched, err := e.contextText(root, contextRequest{Scope: scopeVal, Query: *query, Budget: *budget, PackMode: *pack})
+	text, touched, err := e.contextText(root, contextRequest{Scope: scopeVal, Query: *query, Budget: *budget, PackMode: *pack, WithExternal: *withExternal})
 	if err != nil {
 		return e.fail(err)
 	}
@@ -327,6 +329,7 @@ func cmdShow(e *Env, c command, argv []string) int {
 // (exit 1), warnings are advisory.
 func cmdVerify(e *Env, c command, argv []string) int {
 	fs := e.flagSet(c)
+	checkExternal := fs.Bool("check-external", false, "ตรวจ broken vault:// และ [[wikilink]] pointers กับ external vaults")
 	if _, code, stop := e.parseArgs(c, fs, argv); stop {
 		return code
 	}
@@ -341,6 +344,13 @@ func cmdVerify(e *Env, c command, argv []string) int {
 	rep, err := store.ScanWithReport(root)
 	if err != nil {
 		return e.fail(err)
+	}
+	if *checkExternal {
+		extWarns, eerr := ext.CheckPointers(root, rep.Records)
+		if eerr != nil {
+			return e.fail(eerr)
+		}
+		warnings = append(warnings, extWarns...)
 	}
 	n := len(rep.Records) + len(rep.Broken)
 
