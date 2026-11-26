@@ -35,3 +35,23 @@ func TestRenderContextKnapsack3Tier(t *testing.T) {
 		t.Fatalf("oversized low-density lesson.l2 should be skipped in tight budget:\n%s", out)
 	}
 }
+
+func TestRenderContextWithExternalPointers(t *testing.T) {
+	recs := []store.Record{
+		{ID: "rule.r1", Rel: "rules/r1.md", Layer: "rule", Scope: "global", Status: "active", Body: "always verify", Front: codec.Frontmatter{"title": "Verify"}},
+	}
+	out, _, err := RenderContext(recs, ContextOptions{
+		Scope:  "global",
+		Query:  "oauth",
+		Budget: 4000,
+		ExternalHits: []ExternalHit{
+			{Vault: "obsidian", Path: "Auth/OAuth.md", Heading: "PKCE", Snippet: "Use PKCE for public clients"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderContext with external: %v", err)
+	}
+	if !strings.Contains(out, "External Vault") || !strings.Contains(out, "Auth/OAuth.md") {
+		t.Fatalf("missing External Vault section:\n%s", out)
+	}
+}

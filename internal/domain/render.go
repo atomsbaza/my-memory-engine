@@ -25,16 +25,25 @@ var DefaultBudgets = map[string]int{
 	"handoff": 4000, "decision": 3000, "knowledge": 1200, "total": 20000,
 }
 
+// ExternalHit is a read-only pointer from an external vault (internal/ext).
+type ExternalHit struct {
+	Vault   string
+	Path    string
+	Heading string
+	Snippet string
+}
+
 // ContextOptions mirrors the cmd_context inputs that shape rendering.
 type ContextOptions struct {
-	Root    string // data repo root; when set, budgets are loaded from its taxonomy.json
-	Scope   string // final scope (CLI composes --project into project:<Name>)
-	Query   string
-	Budget   int // total override; 0 → Budgets["total"]
-	Budgets  map[string]int
-	Scoring  *schema.Scoring
-	FTS      func(query string, limit int) ([]string, error)
-	PackMode string // "" (default legacy) | "knapsack" (3-tier greedy knapsack)
+	Root         string // data repo root; when set, budgets are loaded from its taxonomy.json
+	Scope        string // final scope (CLI composes --project into project:<Name>)
+	Query        string
+	Budget       int // total override; 0 → Budgets["total"]
+	Budgets      map[string]int
+	Scoring      *schema.Scoring
+	FTS          func(query string, limit int) ([]string, error)
+	PackMode     string // "" (default legacy) | "knapsack" (3-tier greedy knapsack)
+	ExternalHits []ExternalHit
 	// Indexed reports that the derived index exists; the vector ranks the
 	// baseline reads from that index therefore exist too.
 	Indexed bool
@@ -228,6 +237,7 @@ func RenderContext(recs []store.Record, o ContextOptions) (string, []store.Recor
 			"knowledge/*.md", knowledgeCap)
 		touched = append(touched, know...)
 	}
+	appendExternalBlock(b, o.ExternalHits)
 
 	if len(b.parts) == 0 {
 		return "(memory ว่างสำหรับ scope นี้)", touched, nil
