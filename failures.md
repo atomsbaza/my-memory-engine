@@ -1,0 +1,1 @@
+2026-11-27 — evaluator reject T2/T3 ของ v0.2.1 เพราะขาด CLI test `TestCLIVerifyCheckExternalBrokenLinks` ใน `internal/cli` (มีแค่ unit test ใน `internal/ext`) — ทุก CLI flag ใหม่ต้องมี integration test ใน `internal/cli/*_test.go` และต้องรอผล evaluator ก่อนสรุปจบงาน
