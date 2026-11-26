@@ -92,15 +92,17 @@ func (e *Env) contextText(root string, o contextRequest) (string, []store.Record
 	scoring := sch.Scoring
 	var extHits []domain.ExternalHit
 	if o.WithExternal && o.Query != "" {
-		if hits, herr := ext.Search(root, o.Query, "", 5); herr == nil {
-			for _, h := range hits {
-				extHits = append(extHits, domain.ExternalHit{
-					Vault:   h.Vault,
-					Path:    h.RelPath,
-					Heading: h.Heading,
-					Snippet: h.Snippet,
-				})
-			}
+		hits, herr := ext.Search(root, o.Query, "", 5)
+		if herr != nil {
+			return "", nil, fmt.Errorf("ext search: %w", herr)
+		}
+		for _, h := range hits {
+			extHits = append(extHits, domain.ExternalHit{
+				Vault:   h.Vault,
+				Path:    h.RelPath,
+				Heading: h.Heading,
+				Snippet: h.Snippet,
+			})
 		}
 	}
 	text, touched, err := domain.RenderContext(recs, domain.ContextOptions{

@@ -616,9 +616,24 @@ func clipSnippet(s string, maxRunes int) string {
 }
 
 var (
-	vaultURIRe = regexp.MustCompile(`vault://([A-Za-z0-9_-]+)/([^\s)\]>]+)`)
-	wikilinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]`)
+	vaultURIRe    = regexp.MustCompile(`vault://([A-Za-z0-9_-]+)/([^\s)\]>]+)`)
+	wikilinkRe    = regexp.MustCompile(`\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]`)
+	fencedCodeRe  = regexp.MustCompile("(?s)```.*?```")
+	inlineCodeRe  = regexp.MustCompile("`[^`]+`")
 )
+
+func stripMarkdownCode(s string) string {
+	s = fencedCodeRe.ReplaceAllString(s, " ")
+	return inlineCodeRe.ReplaceAllString(s, " ")
+}
+
+func cleanVaultRel(raw string) string {
+	raw = strings.TrimRight(raw, "`.,;:'\"")
+	if i := strings.IndexAny(raw, "#?"); i >= 0 {
+		raw = raw[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(raw))
+}
 
 // CheckPointers verifies vault://<name>/<path> and [[wikilink]] references in
 // active records against registered external vaults, returning advisory warnings
@@ -632,13 +647,19 @@ func CheckPointers(home string, recs []store.Record) ([]string, error) {
 		return nil, nil
 	}
 
+	var warnings []string
 	vaultFiles := make(map[string]map[string]bool, len(cfg.Vaults))
 	baseNames := make(map[string]bool)
 	for _, v := range cfg.Vaults {
+		if info, serr := os.Stat(v.Path); serr != nil || !info.IsDir() {
+			warnings = append(warnings, fmt.Sprintf("external.json: vault %q unreachable (%s)", v.Name, v.Path))
+			continue
+		}
 		files := map[string]bool{}
-		err := filepath.WalkDir(v.Path, func(p string, d fs.DirEntry, werr error) error {
+		_ = filepath.WalkDir(v.Path, func(p string, d fs.DirEntry, werr error) error {
 			if werr != nil {
-				return werr
+				warnings = append(warnings, fmt.Sprintf("external.json: vault %q walk skipped %s: %v", v.Name, p, werr))
+				return nil
 			}
 			if d.IsDir() {
 				name := d.Name()
@@ -660,9 +681,6 @@ func CheckPointers(home string, recs []store.Record) ([]string, error) {
 			baseNames[strings.ToLower(base)] = true
 			return nil
 		})
-		if err != nil {
-			return nil, fmt.Errorf("ext: check pointers walk %s: %w", v.Name, err)
-		}
 		vaultFiles[v.Name] = files
 	}
 
@@ -674,25 +692,38 @@ func CheckPointers(home string, recs []store.Record) ([]string, error) {
 		}
 	}
 
-	var warnings []string
+	hasWikiTarget := func(target string) bool {
+		if internalTargets[target] || baseNames[target] {
+			return true
+		}
+		for _, files := range vaultFiles {
+			if files[target] || files[target+".md"] {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, r := range recs {
 		if r.Status != "active" {
 			continue
 		}
 		for _, m := range vaultURIRe.FindAllStringSubmatch(r.Body, -1) {
-			vName, rel := m[1], strings.ToLower(m[2])
+			vName := m[1]
+			rel := cleanVaultRel(m[2])
 			files, ok := vaultFiles[vName]
 			if !ok {
-				warnings = append(warnings, fmt.Sprintf("%s: broken vault:// pointer (unknown vault %q): %s", r.Rel, vName, m[0]))
+				warnings = append(warnings, fmt.Sprintf("%s: broken vault:// pointer (unknown/unreachable vault %q): %s", r.Rel, vName, m[0]))
 				continue
 			}
-			if !files[rel] && !files[rel+".md"] {
+			if rel == "" || (!files[rel] && !files[rel+".md"]) {
 				warnings = append(warnings, fmt.Sprintf("%s: broken vault:// pointer (missing file): %s", r.Rel, m[0]))
 			}
 		}
-		for _, m := range wikilinkRe.FindAllStringSubmatch(r.Body, -1) {
+		prose := stripMarkdownCode(r.Body)
+		for _, m := range wikilinkRe.FindAllStringSubmatch(prose, -1) {
 			target := strings.ToLower(strings.TrimSpace(m[1]))
-			if target == "" || internalTargets[target] || baseNames[target] {
+			if target == "" || hasWikiTarget(target) {
 				continue
 			}
 			warnings = append(warnings, fmt.Sprintf("%s: broken [[wikilink]] pointer: %s", r.Rel, m[0]))

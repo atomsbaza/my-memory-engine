@@ -150,7 +150,11 @@ func appendExternalBlock(b *contextBuilder, hits []ExternalHit) {
 	}
 	lines := make([]string, 0, len(hits))
 	for _, h := range hits {
-		lines = append(lines, "- ["+h.Vault+"] "+h.Path+" ("+h.Heading+") — "+clipRunes(collapseSpace(h.Snippet), 80))
+		heading := ""
+		if h.Heading != "" {
+			heading = " (" + h.Heading + ")"
+		}
+		lines = append(lines, "- ["+h.Vault+"] "+h.Path+heading+" — "+clipRunes(collapseSpace(h.Snippet), 80))
 	}
 	b.add("External Vault (pointers — ค้นด้วย `mem ext search`)", strings.Join(lines, "\n"), "external.json", 1200)
 }

@@ -172,7 +172,10 @@ func TestExtReindexOnlyVaultPreservesOthers(t *testing.T) {
 func TestExtCheckPointersBrokenLinks(t *testing.T) {
 	home := t.TempDir()
 	vault := t.TempDir()
-	if err := os.WriteFile(filepath.Join(vault, "ExistingNote.md"), []byte("# Existing"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(vault, "Auth"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vault, "Auth", "OAuth.md"), []byte("# PKCE"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := AddVault(home, "obsidian", vault); err != nil {
@@ -182,7 +185,7 @@ func TestExtCheckPointersBrokenLinks(t *testing.T) {
 		{
 			ID: "lesson.p1", Rel: "lessons/p1.md", Status: "active",
 			Front: codec.Frontmatter{"title": "Pointers"},
-			Body:  "valid: vault://obsidian/ExistingNote and [[ExistingNote]]\nbroken: vault://obsidian/Missing and [[GhostNote]]",
+			Body:  "valid: `vault://obsidian/Auth/OAuth.md#PKCE` and [[Auth/OAuth]]\n```bash\nif [[ -f \"$x\" ]]; then echo ok; fi\n```\nbroken: vault://obsidian/Missing and [[GhostNote]]",
 		},
 	}
 	warns, err := CheckPointers(home, recs)
